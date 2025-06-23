@@ -58,5 +58,8 @@ for lcpath in lcpaths:
 
     fig.savefig(savpath, bbox_inches='tight', format = "pdf")
     fig2.savefig(savpath2, format = "pdf")
+    plt.close(fig)
+    plt.close(fig2)
+    
 
    # assert 0 # remove this when not testing and actually running code
