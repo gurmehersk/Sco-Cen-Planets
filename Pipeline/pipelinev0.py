@@ -5,6 +5,9 @@ from astropy.io import fits
 from lightkurve import search_lightcurve
 import matplotlib.pyplot as plt
 from astropy.timeseries import LombScargle
+from wotan import flatten
+from transitleastsquares import transitleastsquares
+from matplotlib.backends.backend_pdf import PdfPages
 
 
 '''BINNING TO 30 MINUTES'''
@@ -29,9 +32,13 @@ def bin_lightcurve(time, flux, bin_minutes=30):
 
 ''' RETREIVING THE DATA FOR A PARTICULAR TICID AND GETTING ALL ITS INFORMATION '''
 
-sector_number = 91
-tic_id = 9676822
-lcpath = (f"/ar1/TESS/SPOC/s0091/tess2025099153000-s0091-0000000009676822-0288-s_lc.fits")
+#sector_number = 91
+tic_id = 356202062
+#lcpath = (f"/ar1/TESS/SPOC/s0091/tess2025099153000-s0091-0000000009676822-0288-s_lc.fits")
+lcpath = "/home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2025071122000-s0090-0000000356202062-0287-s/tess2025071122000-s0090-0000000356202062-0287-s_lc.fits"
+#r = search_lightcurve(f"TIC 460205581")
+#lcpath = r[0].download()
+multipage_pdf_path = (f"/home/gurmeher/gurmeher/detrending/TIC_COMBINED_{tic_id}.pdf")
 hdu_list = fits.open(lcpath)
 hdr = hdu_list[0].header
 data = hdu_list[1].data
@@ -42,7 +49,18 @@ sap_flux = data['SAP_FLUX']
 pdcsap_flux = data['PDCSAP_FLUX']
 qual = data['QUALITY']
 bkgd = data['SAP_BKG'] # TODO : PLOT ME!
-savpath = f"/home/gurmeher/gurmeher/detrending/TIC_{tic_id}.pdf"
+#savpath = f"/home/gurmeher/gurmeher/detrending/TIC_{tic_id}.pdf"
+
+''' PLOTTING RAW DATA FIRST '''
+
+fig3, axs3 = plt.subplots(nrows =3 , figsize = (6,10), sharex = True)
+plt.subplots_adjust(hspace = 0.3)
+axs3[0].scatter(time, sap_flux, c='k', s= 0.8, label = 'SAP')
+axs3[1].scatter(time, pdcsap_flux, c = 'k', s= 0.8, label = 'PDCSAP')
+axs3[2].scatter(time, bkgd, c = 'k', s = 0.8, label = 'BKGD')
+axs3[0].set_title(f" RAW DATA FOR TIC {tic_id}")
+
+''' CLEANING IT '''
 
 sel = (qual == 0)
 time = time[sel]
@@ -72,6 +90,7 @@ axs[0].set_title(f"TIC {tic_id} — TESS mag = {tessmag} at Temp = {tempeff} Bin
 axs[1].scatter(pdc_time_binned, pdc_flux_binned, c='k', s=0.8, label = 'PDCSAP')
 axs[1].set_ylabel("PDCSAP", fontsize = 8)
 
+'''LOMBSCARGLE PERIODOGRAM '''
 
 frequency_SAP, power_SAP = LombScargle(sap_time_binned, sap_flux_binned).autopower()
 frequency_PDCSAP, power_PDCSAP = LombScargle(pdc_time_binned, pdc_flux_binned).autopower()
@@ -112,11 +131,30 @@ for i in range(len(axs)):
 
     #ax.set_ylim([0, upper_bound])
 
+'''PHASE FOLDING TO ONE TIME PERIOD '''
+
+sap_phase = (sap_time_binned % best_period_SAP)/best_period_SAP
+pdcsap_phase = (pdc_time_binned % best_period_PDCSAP)/best_period_PDCSAP
+fig_phase, axs_phase = plt.subplots(2, figsize=(10, 8), sharex=True)
+plt.subplots_adjust(hspace=0.3)
+axs_phase[0].scatter(sap_phase, sap_flux_binned, s=0.5, c='black', label='SAP Phase Folded')
+axs_phase[0].set_ylabel("Flux")
+axs_phase[0].set_title(f"TIC {tic_id} — SAP Phase Folded at {best_period_SAP:.4f} d") # four decimal places rounded 
+axs_phase[0].legend()
+
+axs_phase[1].scatter(pdcsap_phase, pdc_flux_binned, s=0.5, c='black', label='PDCSAP Phase Folded')
+axs_phase[1].set_xlabel("Phase")
+axs_phase[1].set_ylabel("Flux")
+axs_phase[1].set_title(f"TIC {tic_id} — PDCSAP Phase Folded at {best_period_PDCSAP:.4f} d") # 4 decimal places round
+axs_phase[1].legend()
+
+plt.close(fig_phase)
+
 
 ''' NOW WE DO THE WOTAN FLATTENING OF THE LIGHT CURVE '''
 
 wdwl = 0.1 * best_period_SAP
-from wotan import flatten
+
 flatten_lc1, trend_lc1 = flatten(sap_time_binned, sap_flux_binned, window_length = wdwl, return_trend = True, method = 'biweight')
 flatten_lc2, trend_lc2 = flatten(pdc_time_binned, pdc_flux_binned, window_length = wdwl, return_trend = True, method = 'biweight')
 axs[0].plot(sap_time_binned, trend_lc1, linewidth = 2, color = 'red')
@@ -129,12 +167,93 @@ for ax in axs:
     ax.legend()
 
        
-fig.savefig(savpath, bbox_inches='tight', format = "pdf")
+#fig.savefig(savpath, bbox_inches='tight', format = "pdf")
 plt.close(fig)
 
 ''' NOW WE DO THE TLS PHASE FOLDING AND PLOTTING ON A NEW GRAPH '''
-from transitleastsquares import transitleastsquares
-model1 = transitleastsquares(sap_time_binned, flatten_lc1)
+
+def clean_arrays(time, flux):
+    mask = (~np.isnan(time)) & (~np.isnan(flux))
+    return time[mask], flux[mask]
+
+sap_time_clean, flatten_lc1_clean = clean_arrays(sap_time_binned, flatten_lc1)
+pdc_time_clean, flatten_lc2_clean = clean_arrays(pdc_time_binned, flatten_lc2)
+
+print(f"TIC {tic_id}: SAP clean time length = {len(sap_time_clean)}, flatten length = {len(flatten_lc1_clean)}")
+print(f"TIC {tic_id}: PDCSAP clean time length = {len(pdc_time_clean)}, flatten length = {len(flatten_lc2_clean)}")
+
+print(f"TIC {tic_id}: SAP clean time NaNs = {np.isnan(sap_time_clean).sum()}, flatten NaNs = {np.isnan(flatten_lc1_clean).sum()}")
+print(f"TIC {tic_id}: PDCSAP clean time NaNs = {np.isnan(pdc_time_clean).sum()}, flatten NaNs = {np.isnan(flatten_lc2_clean).sum()}")
+
+if len(sap_time_clean) == 0 or len(flatten_lc1_clean) == 0:
+    print(f"TIC {tic_id}: Empty SAP arrays for TLS, skipping.")
+   
+
+if len(pdc_time_clean) == 0 or len(flatten_lc2_clean) == 0:
+    print(f"TIC {tic_id}: Empty PDCSAP arrays for TLS, skipping.")
+
+
+if len(sap_time_clean) < 50 or (sap_time_clean.max() - sap_time_clean.min()) < 5:
+    print(f"TIC {tic_id}: Not enough data points or too short time span for TLS. Skipping.")
+  
+model1 = transitleastsquares(sap_time_clean, flatten_lc1_clean)
+model2 = transitleastsquares(pdc_time_clean, flatten_lc2_clean)
+
+min_period = 0.5  # days, or a bit more than your cadence
+max_period = (sap_time_clean.max() - sap_time_clean.min()) / 2  # maximum orbtial period is half baseline
+
+
+#import IPython; IPython.embed() # --> to mess around and investigate inside the code
+
+# getting an error on the results module here 
+
+results1 = model1.power(period_min = min_period, period_max = max_period) # now inputting minimum and maximum period to try and fix valueError of empty TLS
+results2 = model2.power(period_min = min_period, period_max = max_period)
+
+figure2, axs2 = plt.subplots(nrows = 2, figsize = (10,12))
+plt.subplots_adjust(hspace=0.3)
+
+# whats the TLS found orbiital period 
+    
+period1 = results1.period
+sde1 = results1.SDE
+
+period2 = results2.period
+sde2 = results2.SDE
+    
+axs2[0].scatter(results1.folded_phase, results1.folded_y, marker = 'o', s = 0.25, color = 'black', label = f'SAP phase-folded\nTLS Period = {period1:.4f} d\nSDE = {sde1:.2f}')
+axs2[0].plot(results1.model_folded_phase, results1.model_folded_model, color = 'red', label = 'TLS MODEL for SAP Flux')
+axs2[0].set_title(f" TLS result algorithm on TIC {tic_id}")
+axs2[1].scatter(results2.folded_phase, results2.folded_y, marker = 'o', s = 0.25, color = 'black', label = f'PDCSAP phase-folded\nTLS Period = {period2:.4f} d\nSDE = {sde2:.2f}')
+axs2[1].plot(results2.model_folded_phase, results2.model_folded_model, color = 'red', label = 'TLS MODEL for PDCSAP Flux')
+
+#savpath2 = f"/home/gurmeher/gurmeher/detrending/TLS_TIC_{tic_id}.pdf"
+for ax in axs2:
+    ax.legend()
+
+#figure2.savefig(savpath2, bbox_inches ='tight', format = 'pdf')
+plt.close(figure2)
+
+with PdfPages(multipage_pdf_path) as pdf:
+
+    # Save first figure as page 1
+    pdf.savefig(fig3, bbox_inches = 'tight')
+    plt.close(fig3)
+
+    # Saving figure as page 2
+    pdf.savefig(fig_phase, bbox_inches = 'tight')
+    plt.close(fig_phase)
+
+    # Save figure as page 3
+    pdf.savefig(fig, bbox_inches='tight')
+    plt.close(fig)
+
+    # Save figure as page 4
+    pdf.savefig(figure2, bbox_inches='tight')
+    plt.close(figure2)
+
+        
+'''model1 = transitleastsquares(sap_time_binned, flatten_lc1)
 model2 = transitleastsquares(pdc_time_binned, flatten_lc2)
 
 results1 = model1.power() # not inputting minimum and maximum period right now, can add if required
@@ -157,5 +276,5 @@ for ax in axs2:
     ax.legend()
 
 figure2.savefig(savpath2, bbox_inches ='tight', format = 'pdf')
-plt.close(figure2)
+plt.close(figure2)'''
 
