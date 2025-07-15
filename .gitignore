@@ -1,0 +1,8 @@
+*pdf
+*pkl
+*secret*
+results*
+*egg-info*
+*pycache*
+
+# these will ignore all these files and not put them on the git repo 

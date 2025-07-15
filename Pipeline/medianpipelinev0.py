@@ -33,10 +33,12 @@ def bin_lightcurve(time, flux, bin_minutes=30):
 ''' RETREIVING THE DATA FOR A PARTICULAR TICID AND GETTING ALL ITS INFORMATION '''
 
 #sector_number = 91
-tic_id = 466484360
+tic_id = 460205581
 #lcpath = (f"/ar1/TESS/SPOC/s0091/tess2025099153000-s0091-0000000009676822-0288-s_lc.fits")
-lcpath = "/home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2019140104343-s0012-0000000466484360-0144-s/tess2019140104343-s0012-0000000466484360-0144-s_lc.fits"
-multipage_pdf_path = (f"/home/gurmeher/gurmeher/detrending/TIC_COMBINED_{tic_id}wotan15.pdf")
+lcpath = "/home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2019085135100-s0010-0000000460205581-0140-s/tess2019085135100-s0010-0000000460205581-0140-s_lc.fits"
+#r = search_lightcurve(f"TIC 460205581")
+#lcpath = r[0].download()
+multipage_pdf_path = (f"/home/gurmeher/gurmeher/detrending/Median_TIC_COMBINED_{tic_id}.pdf")
 hdu_list = fits.open(lcpath)
 hdr = hdu_list[0].header
 data = hdu_list[1].data
@@ -81,11 +83,11 @@ bkg_time_binned, bkg_flux_binned = bin_lightcurve(time[mask], bkgd[mask]/np.nanm
 
 fig, axs = plt.subplots(nrows=6, figsize=(12,18))
 plt.subplots_adjust(hspace=0.3)
-axs[0].scatter(sap_time_binned, sap_flux_binned, zorder = 2, c='k', s=0.8, label = 'SAP')
+axs[0].scatter(sap_time_binned, sap_flux_binned, c='k', s=0.8, label = 'SAP')
 axs[0].set_ylabel("SAP", fontsize = 8 )
 axs[0].set_title(f"TIC {tic_id} — TESS mag = {tessmag} at Temp = {tempeff} Binned to 30 minutes", fontsize=8)
 
-axs[1].scatter(pdc_time_binned, pdc_flux_binned, zorder =2,  c='k', s=0.8, label = 'PDCSAP')
+axs[1].scatter(pdc_time_binned, pdc_flux_binned, c='k', s=0.8, label = 'PDCSAP')
 axs[1].set_ylabel("PDCSAP", fontsize = 8)
 
 '''LOMBSCARGLE PERIODOGRAM '''
@@ -113,8 +115,6 @@ axs[3].plot(frequency_PDCSAP, power_PDCSAP, label = 'PDC LS')
 axs[3].set_ylabel("Power", fontsize = 8)
 axs[3].set_xlabel('Frequency', fontsize = 8)
 
-axs[2].set_xscale('log')  # For SAP
-axs[3].set_xscale('log')  # For PDCSAP
 
 # keeping the sap cutoff for the pdc_sap cutoff since they should be about the same when considering flares, wouldn't change much i believe
 for i in range(len(axs)):
@@ -153,12 +153,12 @@ plt.close(fig_phase)
 
 ''' NOW WE DO THE WOTAN FLATTENING OF THE LIGHT CURVE '''
 
-wdwl = 0.3 * best_period_PDCSAP
+wdwl = 0.1 * best_period_SAP
 
-flatten_lc1, trend_lc1 = flatten(sap_time_binned, sap_flux_binned, window_length = wdwl, return_trend = True, method = 'biweight')
-flatten_lc2, trend_lc2 = flatten(pdc_time_binned, pdc_flux_binned, window_length = wdwl, return_trend = True, method = 'biweight')
-axs[0].scatter(sap_time_binned, trend_lc1, s = 1.5, zorder = 1, color = 'red')
-axs[1].scatter(pdc_time_binned, trend_lc2, s = 1.5, zorder = 1, color = 'red')
+flatten_lc1, trend_lc1 = flatten(sap_time_binned, sap_flux_binned, window_length = wdwl, return_trend = True, method = 'median')
+flatten_lc2, trend_lc2 = flatten(pdc_time_binned, pdc_flux_binned, window_length = wdwl, return_trend = True, method = 'median')
+axs[0].plot(sap_time_binned, trend_lc1, linewidth = 2, color = 'red')
+axs[1].plot(pdc_time_binned, trend_lc2, linewidth = 2, color = 'red')
 
 axs[4].scatter(sap_time_binned, flatten_lc1, s=1, color='black', label = 'Flattened SAP')
 axs[5].scatter(pdc_time_binned, flatten_lc2, s = 1, color = 'black', label = 'Flattened PDCSAP')
@@ -201,7 +201,6 @@ model2 = transitleastsquares(pdc_time_clean, flatten_lc2_clean)
 
 min_period = 0.5  # days, or a bit more than your cadence
 max_period = (sap_time_clean.max() - sap_time_clean.min()) / 2  # maximum orbtial period is half baseline
-print(max_period)
 
 
 #import IPython; IPython.embed() # --> to mess around and investigate inside the code
@@ -221,43 +220,12 @@ sde1 = results1.SDE
 
 period2 = results2.period
 sde2 = results2.SDE
-
-periods = results2.periods
-power = results2.power
-
-f = plt.figure(figsize=(10, 5))
-plt.plot(periods, power, color='black')
-plt.xlabel("Trial Period (days)")
-plt.ylabel("TLS Power (SDE)")
-plt.title("TLS Detection Spectrum")
-plt.grid(True)
-plt.close()
     
 axs2[0].scatter(results1.folded_phase, results1.folded_y, marker = 'o', s = 0.25, color = 'black', label = f'SAP phase-folded\nTLS Period = {period1:.4f} d\nSDE = {sde1:.2f}')
-axs2[0].scatter(results1.model_folded_phase, results1.model_folded_model, s = 1, color = 'red', label = 'TLS MODEL for SAP Flux')
+axs2[0].plot(results1.model_folded_phase, results1.model_folded_model, color = 'red', label = 'TLS MODEL for SAP Flux')
 axs2[0].set_title(f" TLS result algorithm on TIC {tic_id}")
 axs2[1].scatter(results2.folded_phase, results2.folded_y, marker = 'o', s = 0.25, color = 'black', label = f'PDCSAP phase-folded\nTLS Period = {period2:.4f} d\nSDE = {sde2:.2f}')
-axs2[1].scatter(results2.model_folded_phase, results2.model_folded_model, s = 1, color = 'red', label = 'TLS MODEL for PDCSAP Flux')
-
-
-# Predict transit times using TLS results
-tls_period = results2.period
-tls_t0 = results2.T0
-
-# Compute all expected transit times within observed time span
-epochs = np.arange(-1000, 1000)
-transit_times = tls_t0 + (tls_period * epochs)
-# Compute a y-position slightly below the light curve's minimum flux
-y_marker = np.nanmin(flatten_lc2) - 0.005  # or adjust the offset
-
-# Only keep transits that fall within your light curve time span
-in_transit = (transit_times > pdc_time_binned.min()) & (transit_times < pdc_time_binned.max())
-visible_transits = transit_times[in_transit]
-
-# Plot blue triangles at each expected transit time
-for t in visible_transits:
-    axs[5].scatter(t, y_marker, marker='^', color='blue', s=20, zorder=3, label='Transit time' if t==visible_transits[0] else "")
-    axs[1].scatter(t, y_marker, marker = '^', color = 'blue', s=20, zorder=3, label='Transit time' if t == visible_transits[0] else "")
+axs2[1].plot(results2.model_folded_phase, results2.model_folded_model, color = 'red', label = 'TLS MODEL for PDCSAP Flux')
 
 #savpath2 = f"/home/gurmeher/gurmeher/detrending/TLS_TIC_{tic_id}.pdf"
 for ax in axs2:
@@ -269,23 +237,20 @@ plt.close(figure2)
 with PdfPages(multipage_pdf_path) as pdf:
 
     # Save first figure as page 1
-    pdf.savefig(fig, bbox_inches='tight')
-    plt.close(fig)
-    
+    pdf.savefig(fig3, bbox_inches = 'tight')
+    plt.close(fig3)
+
     # Saving figure as page 2
     pdf.savefig(fig_phase, bbox_inches = 'tight')
     plt.close(fig_phase)
 
     # Save figure as page 3
-    pdf.savefig(fig3, bbox_inches = 'tight')
-    plt.close(fig3)
+    pdf.savefig(fig, bbox_inches='tight')
+    plt.close(fig)
 
     # Save figure as page 4
     pdf.savefig(figure2, bbox_inches='tight')
     plt.close(figure2)
-
-    pdf.savefig(f, bbox_inches='tight')
-    plt.close(f)
 
         
 '''model1 = transitleastsquares(sap_time_binned, flatten_lc1)
