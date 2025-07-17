@@ -15,6 +15,13 @@ from matplotlib.backends.backend_pdf import PdfPages
 # import logging
 # creating a rapid rotators text file right now to just ensure whether all stars are actually undergoing processing.
 
+# create a subdirectory for everything for the windowlength as well. --> add this 
+# create a subdirectory for the method wotan vs notch as well.
+
+'''***IMPORTANT*** REMEMBER! --> WHENEVER YOU ARE USING A NEW SLIDER, 
+OR THE NOTCH METHOD, JUST CREATE THE SUBDIRECTORY BEFORE YOU RUN THE CODE!'''
+
+
 def clean_arrays(time, flux):
     mask = (~np.isnan(time)) & (~np.isnan(flux))
     return time[mask], flux[mask]
@@ -59,7 +66,7 @@ def get_this_sectors_ticids(make_plots, sector_number):
     ''' EITHER CREATES PICKLE FILES OR DOES THE DATAVISUALIZATION PROCESS '''
     ticids = []
     if make_plots:
-        highsdetic_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/mainlc/sector{sector_number}/highsdetic10.txt" # changed the file to highsdetic10.txt now 
+        highsdetic_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/"+detrend+"/window"+ wdwle +"/mainlc/sector{sector_number}/highsdetic10.txt" # changed the file to highsdetic10.txt now 
         with open(highsdetic_path, 'r') as f: # opening it in read only mode
             ticids = set(line.strip() for line in f if line.strip())
     else:
@@ -97,7 +104,7 @@ def bin_lightcurve(time, flux, bin_minutes=30):
 
     return np.array(binned_time), np.array(binned_flux)
 
-def pipeline(detrender, sect_no, make_plots = False):
+def pipeline(detrender, sect_no, wdwle, make_plots = False):
     "IMPORTED EVERYTHING OUTSIDE NOW THAT I'M CHUNKING EVERYTHING"
     sector_number = sect_no
     sector_str = str(sect_no)
@@ -105,8 +112,8 @@ def pipeline(detrender, sect_no, make_plots = False):
     detrend = detrender # defining the detrending method, this is not relevant rn, will get relevant when we have notch as alt.
     lcpaths = glob(f"/ar1/TESS/SPOC/s00{sector_number}/*.fits") # wherever your fits lightcurves are saved 
     #lcpaths = [ lcpaths[1] ]
-    failed_tics_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/mainlc/sector{sector_number}/failed_tics.txt"
-    rapid_rotators_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/mainlc/sector{sector_number}/rapidrotators.txt"
+    failed_tics_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/"+ detrend +"/window"+ wdwle +"/mainlc/sector{sector_number}/failed_tics.txt"
+    rapid_rotators_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/"+ detrend + "/window"+ wdwle +"/mainlc/sector{sector_number}/rapidrotators.txt"
     # creating validticids
     valid_ticids = get_this_sectors_ticids(make_plots, sector_number) # now this list will either have all ticids (if makeplots is false)
     # or it will have only the high sde tic ids
@@ -125,12 +132,12 @@ def pipeline(detrender, sect_no, make_plots = False):
             continue # scanning through every tic
         
         #multipage_pdf_path = f"/home/gurmeher/gurmeher/detrending/sde10lightcurves/edited/sector{sector_number}/TIC_{tic_id}.pdf" # comment this 
-        outpath = join(RESULTSDIR, 'mainlc', 'sector'+sector_str, f"TIC_{tic_id}.pdf")
+        outpath = join(RESULTSDIR, 'mainlc', detrend, 'sector'+sector_str, f"TIC_{tic_id}.pdf")
         if os.path.exists(outpath):
             DEBUG and print(f"Skipping TIC {tic_id} — already cached.")
             continue # caching. If tic has already been produced, don't run algorithm again
         
-        pickle_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/pickle/sector{sector_number}/TIC_{tic_id}.pkl" # change this to a new path 
+        pickle_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/"+ detrend + "/window"+ wdwle + "/pickle/sector{sector_number}/TIC_{tic_id}.pkl" # change this to a new path 
         if os.path.exists(pickle_path) or str(tic_id) in failed_tics_path: # trying to cache the failed ones as well
             DEBUG and print(f"Skipping TIC {tic_id} — already cached.")
             continue
@@ -180,9 +187,14 @@ def pipeline(detrender, sect_no, make_plots = False):
 
 
         ''' NOW WE DO THE WOTAN FLATTENING OF THE LIGHT CURVE '''
-        wdwl = 0.3 * best_period_PDCSAP
-        flatten_lc1, trend_lc1 = flatten(sap_time_binned, sap_flux_binned, window_length = wdwl, return_trend = True, method = 'biweight')
-        flatten_lc2, trend_lc2 = flatten(pdc_time_binned, pdc_flux_binned, window_length = wdwl, return_trend = True, method = 'biweight')
+        # add the wotan question wotan vs notch, and add the percentage slider as something the user can input 
+        # also, add wotan flattening method if you need [not necessary]
+        if detrend.lower() == "wotan":
+            wdwl = (wdwle/100.0) * best_period_PDCSAP
+            flatten_lc1, trend_lc1 = flatten(sap_time_binned, sap_flux_binned, window_length = wdwl, return_trend = True, method = 'biweight')
+            flatten_lc2, trend_lc2 = flatten(pdc_time_binned, pdc_flux_binned, window_length = wdwl, return_trend = True, method = 'biweight')
+        else if detrend.lower() == "notch":
+            continue
         
 
         ''' NOW WE DO THE TLS PHASE FOLDING AND PLOTTING ON A NEW GRAPH '''
@@ -235,10 +247,10 @@ def pipeline(detrender, sect_no, make_plots = False):
                     pickle.dump(results2, f) # Only doing PDCSAP for this
                 
                 # Here, the entire High_Detections.py code goes in!!
-                highsdetic_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/mainlc/sector{sector_number}/highsdetic10.txt"
+                highsdetic_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/"+detrend+ "/window"+ wdwle +"/mainlc/sector{sector_number}/highsdetic10.txt"
                 objects = []
                 high_detection = []
-                path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/pickle/sector{sector_number}/"
+                path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/"+detrend+ "/window"+ wdwle +"/pickle/sector{sector_number}/"
 
                 # a bit of caching 
                 existing_tics = set()
