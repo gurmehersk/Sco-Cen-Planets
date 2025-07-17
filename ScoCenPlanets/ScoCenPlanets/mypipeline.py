@@ -41,7 +41,7 @@ def clip_masks(sap_flux):
     return q1, q3, iqr, mask
 
 
-def clean_data(qual, time, bkgd, sap_flux, pdcsap_flux):
+def clean_data(qual, time, sap_flux, pdcsap_flux, bkgd):
     ''' CLEANING THE DATA '''
     sel = (qual == 0)
     time = time[sel]
@@ -62,11 +62,11 @@ def get_data(data, hdr):
     bkgd = data['SAP_BKG'] # TODO : PLOT ME!
     return time, tessmag, tempeff, sap_flux, pdcsap_flux, qual, bkgd
 
-def get_this_sectors_ticids(make_plots, sector_number):
+def get_this_sectors_ticids(make_plots, sector_number, detrend, wdwstr):
     ''' EITHER CREATES PICKLE FILES OR DOES THE DATAVISUALIZATION PROCESS '''
     ticids = []
     if make_plots:
-        highsdetic_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/"+detrend+"/window"+ wdwle +"/mainlc/sector{sector_number}/highsdetic10.txt" # changed the file to highsdetic10.txt now 
+        highsdetic_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/"+detrend+"/window"+ wdwstr +f"/mainlc/sector{sector_number}/highsdetic10.txt" # changed the file to highsdetic10.txt now 
         with open(highsdetic_path, 'r') as f: # opening it in read only mode
             ticids = set(line.strip() for line in f if line.strip())
     else:
@@ -104,18 +104,19 @@ def bin_lightcurve(time, flux, bin_minutes=30):
 
     return np.array(binned_time), np.array(binned_flux)
 
-def pipeline(detrender, sect_no, wdwle, make_plots = False):
+def pipeline(detrender, sect_no, wdwle, make_plots = True):
     "IMPORTED EVERYTHING OUTSIDE NOW THAT I'M CHUNKING EVERYTHING"
     sector_number = sect_no
     sector_str = str(sect_no)
     sdethreshold = 10
+    wdwstr = str(wdwle)
     detrend = detrender # defining the detrending method, this is not relevant rn, will get relevant when we have notch as alt.
     lcpaths = glob(f"/ar1/TESS/SPOC/s00{sector_number}/*.fits") # wherever your fits lightcurves are saved 
     #lcpaths = [ lcpaths[1] ]
-    failed_tics_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/"+ detrend +"/window"+ wdwle +"/mainlc/sector{sector_number}/failed_tics.txt"
-    rapid_rotators_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/"+ detrend + "/window"+ wdwle +"/mainlc/sector{sector_number}/rapidrotators.txt"
+    failed_tics_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/"+ detrend +"/window"+ wdwstr +f"/mainlc/sector{sector_number}/failed_tics.txt"
+    rapid_rotators_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/"+ detrend + "/window"+ wdwstr +f"/mainlc/sector{sector_number}/rapidrotators.txt"
     # creating validticids
-    valid_ticids = get_this_sectors_ticids(make_plots, sector_number) # now this list will either have all ticids (if makeplots is false)
+    valid_ticids = get_this_sectors_ticids(make_plots, sector_number, detrend, wdwstr) # now this list will either have all ticids (if makeplots is false)
     # or it will have only the high sde tic ids
     DEBUG = True
 
@@ -132,19 +133,34 @@ def pipeline(detrender, sect_no, wdwle, make_plots = False):
             continue # scanning through every tic
         
         #multipage_pdf_path = f"/home/gurmeher/gurmeher/detrending/sde10lightcurves/edited/sector{sector_number}/TIC_{tic_id}.pdf" # comment this 
-        outpath = join(RESULTSDIR, 'mainlc', detrend, 'sector'+sector_str, f"TIC_{tic_id}.pdf")
+        outpath = join(RESULTSDIR, detrend, 'window'+wdwstr, 'mainlc', 'sector'+sector_str, f"TIC_{tic_id}.pdf")
         if os.path.exists(outpath):
             DEBUG and print(f"Skipping TIC {tic_id} — already cached.")
             continue # caching. If tic has already been produced, don't run algorithm again
         
-        pickle_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/"+ detrend + "/window"+ wdwle + "/pickle/sector{sector_number}/TIC_{tic_id}.pkl" # change this to a new path 
-        if os.path.exists(pickle_path) or str(tic_id) in failed_tics_path: # trying to cache the failed ones as well
-            DEBUG and print(f"Skipping TIC {tic_id} — already cached.")
-            continue
+        pickle_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/"+ detrend + "/window"+ wdwstr + f"/pickle/sector{sector_number}/TIC_{tic_id}.pkl" # change this to a new path 
+        
+        if not make_plots:
+            if os.path.exists(pickle_path) or str(tic_id) in failed_tics_path: # trying to cache the failed ones as well
+                DEBUG and print(f"Skipping TIC {tic_id} — already cached.")
+                continue
 
         time, tessmag, tempeff, sap_flux, pdcsap_flux, qual, bkgd = get_data(data, hdr)
         #savpath = f"/home/gurmeher/gurmeher/detrending/TIC_{tic_id}.pdf"
         time, sap_flux, pdcsap_flux, bkgd = clean_data(qual, time, sap_flux, pdcsap_flux, bkgd)
+        #sel = (qual == 0)
+        #time = time[sel]
+        #sap_flux = sap_flux[sel]
+        #pdcsap_flux = pdcsap_flux[sel]
+        #bkgd = bkgd[sel]
+
+        #q1 = np.nanpercentile(sap_flux, 25)
+        #q3 = np.nanpercentile(sap_flux, 75)
+        #iqr = q3 - q1
+
+        # Define upper limit to clip flares
+        #upper_bound = q3 + 1.5 * iqr
+        #mask = sap_flux < upper_bound
        
         q1,q3,iqr,mask = clip_masks(sap_flux)
 
@@ -156,11 +172,11 @@ def pipeline(detrender, sect_no, wdwle, make_plots = False):
 
         frequency_SAP, power_SAP = LombScargle(sap_time_binned, sap_flux_binned).autopower()
         frequency_PDCSAP, power_PDCSAP = LombScargle(pdc_time_binned, pdc_flux_binned).autopower()
-        mask = frequency_PDCSAP < 20
-        frequency_PDCSAP = frequency_PDCSAP[mask]
-        power_PDCSAP = power_PDCSAP[mask]
-        frequency_SAP = frequency_SAP[mask]
-        power_SAP = power_SAP[mask]
+        mask2 = frequency_PDCSAP < 20
+        frequency_PDCSAP = frequency_PDCSAP[mask2]
+        power_PDCSAP = power_PDCSAP[mask2]
+        frequency_SAP = frequency_SAP[mask2]
+        power_SAP = power_SAP[mask2]
         best_frequency_SAP = frequency_SAP[np.argmax(power_SAP)]
         best_period_SAP = 1 / best_frequency_SAP 
         best_frequency_PDCSAP = frequency_PDCSAP[np.argmax(power_PDCSAP)]
@@ -193,7 +209,7 @@ def pipeline(detrender, sect_no, wdwle, make_plots = False):
             wdwl = (wdwle/100.0) * best_period_PDCSAP
             flatten_lc1, trend_lc1 = flatten(sap_time_binned, sap_flux_binned, window_length = wdwl, return_trend = True, method = 'biweight')
             flatten_lc2, trend_lc2 = flatten(pdc_time_binned, pdc_flux_binned, window_length = wdwl, return_trend = True, method = 'biweight')
-        else if detrend.lower() == "notch":
+        elif detrend.lower() == "notch":
             continue
         
 
@@ -247,10 +263,10 @@ def pipeline(detrender, sect_no, wdwle, make_plots = False):
                     pickle.dump(results2, f) # Only doing PDCSAP for this
                 
                 # Here, the entire High_Detections.py code goes in!!
-                highsdetic_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/"+detrend+ "/window"+ wdwle +"/mainlc/sector{sector_number}/highsdetic10.txt"
+                highsdetic_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/"+detrend+ "/window"+ wdwstr +f"/mainlc/sector{sector_number}/highsdetic10.txt"
                 objects = []
                 high_detection = []
-                path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/"+detrend+ "/window"+ wdwle +"/pickle/sector{sector_number}/"
+                path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/"+detrend+ "/window"+ wdwstr +f"/pickle/sector{sector_number}/"
 
                 # a bit of caching 
                 existing_tics = set()
