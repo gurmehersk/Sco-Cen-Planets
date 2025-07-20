@@ -104,7 +104,7 @@ def bin_lightcurve(time, flux, bin_minutes=30):
 
     return np.array(binned_time), np.array(binned_flux)
 
-def pipeline(detrender, sect_no, wdwle, make_plots = True):
+def pipeline(detrender, sect_no, wdwle, make_plots = False):
     "IMPORTED EVERYTHING OUTSIDE NOW THAT I'M CHUNKING EVERYTHING"
     sector_number = sect_no
     sector_str = str(sect_no)
@@ -164,9 +164,14 @@ def pipeline(detrender, sect_no, wdwle, make_plots = True):
        
         q1,q3,iqr,mask = clip_masks(sap_flux)
 
-        sap_time_binned, sap_flux_binned = bin_lightcurve(time[mask], sap_flux[mask]/np.nanmedian(sap_flux[mask]))
-        pdc_time_binned, pdc_flux_binned = bin_lightcurve(time[mask], pdcsap_flux[mask]/np.nanmedian(pdcsap_flux[mask]))
-        bkg_time_binned, bkg_flux_binned = bin_lightcurve(time[mask], bkgd[mask]/np.nanmedian(bkgd[mask]))
+        time = time[mask]
+        pdcsap_flux = pdcsap_flux[mask]
+        sap_flux = sap_flux[mask]
+        bkgd = bkgd[mask]
+
+        sap_time_binned, sap_flux_binned = bin_lightcurve(time, sap_flux/np.nanmedian(sap_flux))
+        pdc_time_binned, pdc_flux_binned = bin_lightcurve(time, pdcsap_flux/np.nanmedian(pdcsap_flux))
+        bkg_time_binned, bkg_flux_binned = bin_lightcurve(time, bkgd/np.nanmedian(bkgd))
 
         '''LOMBSCARGLE PERIODOGRAM '''
 
@@ -207,15 +212,16 @@ def pipeline(detrender, sect_no, wdwle, make_plots = True):
         # also, add wotan flattening method if you need [not necessary]
         if detrend.lower() == "wotan":
             wdwl = (wdwle/100.0) * best_period_PDCSAP
-            flatten_lc1, trend_lc1 = flatten(sap_time_binned, sap_flux_binned, window_length = wdwl, return_trend = True, method = 'biweight')
-            flatten_lc2, trend_lc2 = flatten(pdc_time_binned, pdc_flux_binned, window_length = wdwl, return_trend = True, method = 'biweight')
+            # changing the wotan flattening to the entire data, not just binned to preserve SNR!
+            flatten_lc1, trend_lc1 = flatten(time, sap_flux/np.nanmedian(sap_flux), window_length = wdwl, return_trend = True, method = 'biweight')
+            flatten_lc2, trend_lc2 = flatten(time, pdcsap_flux/np.nanmedian(pdcsap_flux), window_length = wdwl, return_trend = True, method = 'biweight')
         elif detrend.lower() == "notch":
             continue
         
 
         ''' NOW WE DO THE TLS PHASE FOLDING AND PLOTTING ON A NEW GRAPH '''
-        sap_time_clean, flatten_lc1_clean = clean_arrays(sap_time_binned, flatten_lc1)
-        pdc_time_clean, flatten_lc2_clean = clean_arrays(pdc_time_binned, flatten_lc2)
+        sap_time_clean, flatten_lc1_clean = clean_arrays(time, flatten_lc1)
+        pdc_time_clean, flatten_lc2_clean = clean_arrays(time, flatten_lc2)
 
         DEBUG and print(f"TIC {tic_id}: SAP clean time length = {len(sap_time_clean)}, flatten length = {len(flatten_lc1_clean)}")
         DEBUG and print(f"TIC {tic_id}: PDCSAP clean time length = {len(pdc_time_clean)}, flatten length = {len(flatten_lc2_clean)}")
@@ -298,6 +304,29 @@ def pipeline(detrender, sect_no, wdwle, make_plots = True):
             results1 = model1.power(period_min = min_period, period_max = max_period) # now inputting minimum and maximum period to try and fix valueError of empty TLS
             results2 = model2.power(period_min = min_period, period_max = max_period)
 
+            # Predict transit times using TLS results
+            tls_period = results2.period
+            tls_t0 = results2.T0
+
+            # Compute all expected transit times within observed time span
+            epochs = np.arange(-1000, 1000)
+            transit_times = tls_t0 + (tls_period * epochs)
+            # Compute a y-position slightly below the light curve's minimum flux
+            y_marker = np.nanmin(flatten_lc2) - 0.005  # or adjust the offset
+
+            # Only keep transits that fall within your light curve time span
+            in_transit = (transit_times > pdc_time_binned.min()) & (transit_times < pdc_time_binned.max())
+            visible_transits = transit_times[in_transit]
+            ticker = True
+            harmonic = 0
+            possible_harmonics = [0.25, 0.5, 1, 2, 3, 4]
+            for h in possible_harmonics:
+                harmonic_checker = ((np.abs(best_period_PDCSAP-(h*tls_period)))/best_period_PDCSAP)*100
+                if harmonic_checker <= 1:
+                    ticker = False
+                    harmonic = h
+                    break
+
             # no need for a try and except here because only working tls algorithms will fall down this path since they are in high
             # sde tic ids
 
@@ -371,16 +400,26 @@ def pipeline(detrender, sect_no, wdwle, make_plots = True):
 
             ''' PLOTTING WOTAN FLATTENING CURVE '''
 
-            axs[0].plot(sap_time_binned, trend_lc1, linewidth = 1.5, zorder = 1, color = 'red')
-            axs[1].plot(pdc_time_binned, trend_lc2, linewidth = 1.5, zorder = 1, color = 'red')
+            axs[0].plot(time, trend_lc1, linewidth = 1.5, zorder = 1, color = 'red')
+            axs[1].plot(time, trend_lc2, linewidth = 1.5, zorder = 1, color = 'red')
 
-            axs[4].scatter(sap_time_binned, flatten_lc1, s=1, color='black', label = 'Flattened SAP')
-            axs[5].scatter(pdc_time_binned, flatten_lc2, s = 1, color = 'black', label = 'Flattened PDCSAP')
+            axs[4].scatter(time, flatten_lc1, s=1, color='black', label = 'Flattened SAP')
+            axs[5].scatter(time, flatten_lc2, s = 1, color = 'black', label = 'Flattened PDCSAP')
 
             for ax in axs:
                 ax.legend()
 
-                
+            # Plot blue triangles at each expected transit time
+            for t in visible_transits:
+                axs[5].scatter(t, y_marker, marker='^', color='blue', s=20, zorder=3, label='Transit time' if t==visible_transits[0] else "")
+                axs[1].scatter(t, y_marker, marker = '^', color = 'blue', s=20, zorder=3, label='Transit time' if t == visible_transits[0] else "")
+
+
+            if not ticker:
+                axs[1].set_title(f"Prot is {harmonic:.2f}x of Porb ", color = "red")
+            else:
+                axs[1].set_title(f"Prot is not a harmonic of Porb, Potential Planetary Signal")
+  
             #fig.savefig(savpath, bbox_inches='tight', format = "pdf")
             plt.close(fig)
 
