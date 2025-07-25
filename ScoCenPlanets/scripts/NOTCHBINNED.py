@@ -243,12 +243,12 @@ axs[0].scatter(pdc_time_binned, pdc_flux_binned, s = 0.5, zorder = 2)
 prot = Lombscargle(pdc_time_binned, pdc_flux_binned)
 cadence = np.nanmedian(np.diff(pdc_time_binned))
 #dictionary = {"window_length" : 0.3*prot}
-dictionary = {"window_length" : np.maximum(prot/20, cadence * 10)}
-'''if prot > 2:
+#dictionary = {"window_length" : np.maximum(prot/20, cadence * 10)}
+if prot > 2:
     dictionary = {"window_length" : 1}
 
 else :
-    dictionary = {"window_length" : 0.5} # window size 1 day'''
+    dictionary = {"window_length" : 0.5} # window size 1 day
 
 clipped_flux = slide_clip(
             pdc_time_binned, pdc_flux_binned, window_length=dictionary['window_length'],
