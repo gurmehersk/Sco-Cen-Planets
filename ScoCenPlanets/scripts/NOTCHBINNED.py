@@ -212,14 +212,19 @@ def _run_notch(TIME, FLUX, dtr_dict, verbose=False):
 
     return flat_flux, trend_flux, notch
 
-tic_id = 441420236
-# 166527623 , the hip star isnt working --> wrong period everytime
+tic_id = 146520535
+# 166527623 , the hip star isnt working --> wrong period everytime --> it isnt detecting the planet transit, but artificial transits
+# created due to data downlinks --> big problem --> similar to what wotan did in many cases, maybe jumped over possible other transits
+# in a similar fashion/way --> i remember trying to find a way to remove these earlier, just to remove any dips near data downtime regions,
+# but i couldnt figure out a way to do this, maybe talk to luke about this. 
+
 # 441420236, AU Mic b worked with this pipeline
 # 460205581, TOI 837b, Luke's planet worked.
-# 146520535 , not working
 
-# Major point to note, the flattened flux method is much better than the deltabic thing which sometimes just doesnt work
-path = "/home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2020186164531-s0027-0000000441420236-0189-s/tess2020186164531-s0027-0000000441420236-0189-s_lc.fits"
+# 146520535 , not working --> orbital period is wrong
+
+# Major point to note, the flattened flux method is much better than the deltabic thing which sometimes just doesnt work --> returns nans
+path = "/home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2020324010417-s0032-0000000146520535-0200-s/tess2020324010417-s0032-0000000146520535-0200-s_lc.fits"
 pdfpath = f"/home/gurmeher/gurmeher/Notch_and_LOCoR/results/TIC_{tic_id}.pdf"
 
 hdu_list = fits.open(path)
@@ -238,7 +243,7 @@ pdc_time_binned, pdc_flux_binned = bin_lightcurve(time_clean, flux_clean)
 #pdc_time_binned, pdc_flux_binned = bin_lightcurve(time, pdcsap_flux/np.nanmedian(pdcsap_flux))
 #pdc_time_binned, pdc_flux_binned = bin_lightcurve(time, pdcsap_flux)
 fig, axs = plt.subplots(nrows = 5, figsize = (6,10), sharex = False)
-axs[0].scatter(pdc_time_binned, pdc_flux_binned, s = 0.5, zorder = 2)
+axs[0].scatter(pdc_time_binned, pdc_flux_binned, s = 0.5, zorder = 2, color = 'black')
 
 prot = Lombscargle(pdc_time_binned, pdc_flux_binned)
 cadence = np.nanmedian(np.diff(pdc_time_binned))
@@ -298,10 +303,26 @@ period2 = results2.period
 #sde1 = results1.SDE
 sde2 = results2.SDE
 
+tls_t0 = results2.T0
+
+# Compute all expected transit times within observed time span
+epochs = np.arange(-1000, 1000)
+transit_times = tls_t0 + (period2 * epochs)
+# Compute a y-position slightly below the light curve's minimum flux
+y_marker = np.nanmin(flat_flux) - 0.005  # or adjust the offset
+
+# Only keep transits that fall within your light curve time span
+in_transit = (transit_times > pdc_time_binned.min()) & (transit_times < pdc_time_binned.max())
+visible_transits = transit_times[in_transit]
+
 #axs[3].scatter(results1.folded_phase, results1.folded_y, marker = 'o', s = 0.25, color = 'black', label = f'SAP phase-folded\nTLS Period = {period1:.4f} d\nSDE = {sde1:.2f}')
 #axs[3].plot(results1.model_folded_phase, results1.model_folded_model, color = 'red', label = 'TLS MODEL for SAP Flux')
 axs[4].scatter(results2.folded_phase, results2.folded_y, marker = 'o', s = 0.25, color = 'black', label = f'PDCSAP phase-folded\nTLS Period = {period2:.4f} d\nSDE = {sde2:.2f}')
 axs[4].plot(results2.model_folded_phase, results2.model_folded_model, color = 'red', label = 'TLS MODEL for PDCSAP Flux')
+for t in visible_transits:
+    axs[0].scatter(t, y_marker, marker='^', color='blue', s=20, zorder=3, label='Transit time' if t==visible_transits[0] else "")
+    
+
 
 
 
