@@ -28,7 +28,9 @@ def bin_lightcurve(time, flux, bin_minutes=30):
             binned_flux.append(np.nanmean(bin_flux))
 
     return np.array(binned_time), np.array(binned_flux)
-
+# to clarify for my own understanding since I was getting an error, np.ndarray is the object type whereas np.array is a function
+# you call to create a list so when you are returning something its okay for it to be np.array but if youre accepting a sort of 
+# variable, use np.ndarray
 def create_downlink_mask(
     time: np.ndarray,
     gap_threshold: float = 0.5,
