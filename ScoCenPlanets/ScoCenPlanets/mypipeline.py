@@ -35,7 +35,7 @@ OR THE NOTCH METHOD, JUST CREATE THE SUBDIRECTORY BEFORE YOU RUN THE CODE!'''
 
 # 28th July
 # Making the NOTCH part of this program since we now have the notch implementation semi complete.
-
+# FOR NOTCH, THE INPUT OF THE SLIDER DOESNT MATTER SINCE THE SLIDER LENGTH IS DETERMINED BY THE ROTATIONAL PERIOD!
 
 '''FUNCTIONS *ONLY* FOR NOTCH IMPLEMENTATION BEGINNING'''
 def create_downlink_mask(
@@ -302,17 +302,21 @@ def _run_notch(TIME, FLUX, dtr_dict, verbose=False): # KEEP VERBOSE FALSE becaus
 
 def unvetted_tic(tic_id, detrend, sector_number, wdwstr):
     tic_id = str(tic_id)
-    window_length = ["10","15","20","30"]
-    other_windows = [w for w in window_length if w != wdwstr]
-    for i in other_windows:
-        path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/"+detrend+"/window"+ i +f"/mainlc/sector{sector_number}/highsdetic10.txt"
-        existing_tics = set()
-        with open(path, "r") as f:
-            existing_tics = set(line.strip() for line in f)
-        if  tic_id in existing_tics:
-            return False
-        else:
-            continue
+
+    if detrend.lower() == "wotan":
+        window_length = ["10","15","20","30"]
+        other_windows = [w for w in window_length if w != wdwstr]
+        for i in other_windows:
+            path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/"+detrend+"/window"+ i +f"/mainlc/sector{sector_number}/highsdetic10.txt"
+            existing_tics = set()
+            with open(path, "r") as f:
+                existing_tics = set(line.strip() for line in f)
+            if  tic_id in existing_tics:
+                return False
+            else:
+                continue
+    elif detrend.lower() == "notch":
+        # the path changes for notch since no windowed slider lengths
     return True
 
 
@@ -358,12 +362,15 @@ def get_data(data, hdr):
 
 def get_this_sectors_ticids(make_plots, sector_number, detrend, wdwstr):
     ''' EITHER CREATES PICKLE FILES OR DOES THE DATAVISUALIZATION PROCESS '''
+    # NEED TO CHANGE THIS TO ACCOUNT FOR NOTCH IMPLEMENTATION 
     ticids = []
     if make_plots:
+        # add if condition for wotan, else for notch
         highsdetic_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/"+detrend+"/window"+ wdwstr +f"/mainlc/sector{sector_number}/highsdetic10.txt" # changed the file to highsdetic10.txt now 
         with open(highsdetic_path, 'r') as f: # opening it in read only mode
             ticids = set(line.strip() for line in f if line.strip())
     else:
+        # add if condition for wotan, else for notch
         lcpaths = glob(f"/ar1/TESS/SPOC/s00{sector_number}/*.fits") # accesses all the fits files in whatever path you've stored them in
         # TODO:
         # Get full list of ticids for this sector
@@ -405,6 +412,7 @@ def pipeline(detrender, sect_no, wdwle, make_plots = False):
     detrend = detrender # defining the detrending method, this is not relevant rn, will get relevant when we have notch as alt.
     lcpaths = glob(f"/ar1/TESS/SPOC/s00{sector_number}/*.fits") # wherever your fits lightcurves are saved 
     #lcpaths = [ lcpaths[1] ]
+    # IMPORTANT!! wotan separate, notch separate, notch doesnt have a rapid_rotators path though since it will do it on that as well.
     failed_tics_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/"+ detrend +"/window"+ wdwstr +f"/mainlc/sector{sector_number}/failed_tics.txt"
     rapid_rotators_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/"+ detrend + "/window"+ wdwstr +f"/mainlc/sector{sector_number}/rapidrotators.txt"
     # creating validticids
@@ -430,6 +438,8 @@ def pipeline(detrender, sect_no, wdwle, make_plots = False):
             DEBUG and print(f"Skipping TIC {tic_id} — already cached.")
             continue # caching. If tic has already been produced, don't run algorithm again
         
+
+        # NEW PICKLE PATH FOR NOTCH??? --> LOT OF WORK, CONSULT LUKE 
         pickle_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/"+ detrend + "/window"+ wdwstr + f"/pickle/sector{sector_number}/TIC_{tic_id}.pkl" # change this to a new path 
         
         if not make_plots:
@@ -572,254 +582,260 @@ def pipeline(detrender, sect_no, wdwle, make_plots = False):
 
             # not skipping them now though, i will let them go into the exception error and be saved in the failedtics.txt list
         
-        # TO ADD MODELS ACCORDING TO THE DETRENDER CHOSEN!
-        model1 = transitleastsquares(sap_time_clean, flatten_lc1_clean)
+        
+            
+        
+        model1 = transitleastsquares(sap_time_clean, flatten_lc1_clean) 
+        '''*ATTENTION* !!!! 
+        sap_time_clean will be ** if NOTCH is chosen.
+        NOT CHANGING THIS FOR NAMING CONSISTENCY IN CODE '''
         model2 = transitleastsquares(pdc_time_clean, flatten_lc2_clean)
 
         min_period = 0.5  # days, or a bit more than your cadence
-        max_period = (sap_time_clean.max() - sap_time_clean.min()) / 2  # maximum orbtial period is half baseline
+        max_period = (pdc_time_clean.max() - pdc_time_clean.min()) / 2  # maximum orbtial period is half baseline
         DEBUG and print(max_period)
 
+        # TO ADD PLOTS ACCORDING TO THE DETRENDER CHOSEN!
 
-        #import IPython; IPython.embed() # --> to mess around and investigate inside the code
+            #import IPython; IPython.embed() # --> to mess around and investigate inside the code
+        if detrend.lower() == "wotan":
+            # getting an error on the results module here --> NOT ANYMORE I THINK (28TH JULY) 
+            if not make_plots:
+                try:
+                    results1 = model1.power(period_min = min_period, period_max = max_period) # now inputting minimum and maximum period to try and fix valueError of empty TLS
+                    results2 = model2.power(period_min = min_period, period_max = max_period)
+                    ''' CACHING TO IGNORE ANY ITERATIONS THAT HAVE ALREADY OCCURED ''' 
 
-        # getting an error on the results module here 
-        if not make_plots:
-            try:
-                results1 = model1.power(period_min = min_period, period_max = max_period) # now inputting minimum and maximum period to try and fix valueError of empty TLS
-                results2 = model2.power(period_min = min_period, period_max = max_period)
-                ''' CACHING TO IGNORE ANY ITERATIONS THAT HAVE ALREADY OCCURED ''' 
+                    '''pickle_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/pickle/sector{sector_number}/TIC_{tic_id}.pkl" # change this to a new path 
+                    if os.path.exists(pickle_path) or str(tic_id) in failed_tics_path: # trying to cache the failed ones as well
+                        DEBUG and print(f"Skipping TIC {tic_id} — already cached.")
+                        continue'''
+                    # the above line of code of the pickle path and the if statement was moved up to the top to avoid running tls on these
+                    # as that wasted computing space.
+                    with open(pickle_path, 'wb') as f:
+                        pickle.dump(results2, f) # Only doing PDCSAP for this
+                    
+                    # Here, the entire High_Detections.py code goes in!!
+                    highsdetic_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/"+detrend+ "/window"+ wdwstr +f"/mainlc/sector{sector_number}/highsdetic10.txt"
+                    objects = []
+                    high_detection = []
+                    path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/"+detrend+ "/window"+ wdwstr +f"/pickle/sector{sector_number}/"
 
-                '''pickle_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/pickle/sector{sector_number}/TIC_{tic_id}.pkl" # change this to a new path 
-                if os.path.exists(pickle_path) or str(tic_id) in failed_tics_path: # trying to cache the failed ones as well
-                    DEBUG and print(f"Skipping TIC {tic_id} — already cached.")
-                    continue'''
-                # the above line of code of the pickle path and the if statement was moved up to the top to avoid running tls on these
-                # as that wasted computing space.
-                with open(pickle_path, 'wb') as f:
-                    pickle.dump(results2, f) # Only doing PDCSAP for this
-                
-                # Here, the entire High_Detections.py code goes in!!
-                highsdetic_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/"+detrend+ "/window"+ wdwstr +f"/mainlc/sector{sector_number}/highsdetic10.txt"
-                objects = []
-                high_detection = []
-                path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/"+detrend+ "/window"+ wdwstr +f"/pickle/sector{sector_number}/"
+                    # a bit of caching 
+                    existing_tics = set()
+                    if os.path.exists(highsdetic_path):
+                        with open(highsdetic_path, "r") as f:
+                            existing_tics = set(line.strip() for line in f)
 
-                # a bit of caching 
-                existing_tics = set()
-                if os.path.exists(highsdetic_path):
-                    with open(highsdetic_path, "r") as f:
-                        existing_tics = set(line.strip() for line in f)
+                    for file in os.listdir(path): # traversing through all files inside the path
+                        if file.endswith(".pkl"): # if the file is a pickle file 
+                            filename_no_ext = os.path.splitext(file)[0]  # This is now a string like "TIC_123456789"
+                            tic_id = filename_no_ext.split("_")[1]       # 2 step process to extract the TIC ID before unpacking it and adding it to a txt file
+                            filepath = os.path.join(path, file)
+                            with open(filepath, "rb" ) as f:
+                                obj = pickle.load(f)
+                                sde = obj.get('SDE', None)
+                            if sde > sdethreshold and tic_id not in existing_tics:
+                                with open(highsdetic_path, "a") as f:
+                                    f.write(f"{tic_id}\n")
 
-                for file in os.listdir(path): # traversing through all files inside the path
-                    if file.endswith(".pkl"): # if the file is a pickle file 
-                        filename_no_ext = os.path.splitext(file)[0]  # This is now a string like "TIC_123456789"
-                        tic_id = filename_no_ext.split("_")[1]       # 2 step process to extract the TIC ID before unpacking it and adding it to a txt file
-                        filepath = os.path.join(path, file)
-                        with open(filepath, "rb" ) as f:
-                            obj = pickle.load(f)
-                            sde = obj.get('SDE', None)
-                        if sde > sdethreshold and tic_id not in existing_tics:
-                            with open(highsdetic_path, "a") as f:
-                                f.write(f"{tic_id}\n")
-
-            except ValueError as e:
-                DEBUG and print(f"TIC {tic_id}: TLS failed with error: {e}")
-                with open(failed_tics_path, "a") as failfile:
-                    failfile.write(f"{tic_id}\n")
-                continue
-
-
-        if make_plots:
-            
-            if not unvetted_tic(tic_id, detrend, sector_number, wdwstr): # we are only trying to plot files which are not found in 
-            #other highsdetic files, i.e., haven't already been run and found/detected/vetted
-                continue
-
-            results1 = model1.power(period_min = min_period, period_max = max_period) # now inputting minimum and maximum period to try and fix valueError of empty TLS
-            results2 = model2.power(period_min = min_period, period_max = max_period)
-
-            # Predict transit times using TLS results
-            tls_period = results2.period
-            tls_t0 = results2.T0
-
-            # Compute all expected transit times within observed time span
-            epochs = np.arange(-1000, 1000)
-            transit_times = tls_t0 + (tls_period * epochs)
-            # Compute a y-position slightly below the light curve's minimum flux
-            y_marker = np.nanmin(flatten_lc2) - 0.005  # or adjust the offset
-
-            # Only keep transits that fall within your light curve time span
-            in_transit = (transit_times > pdc_time_binned.min()) & (transit_times < pdc_time_binned.max())
-            visible_transits = transit_times[in_transit]
-            ticker = True
-            harmonic = 0
-            possible_harmonics = [0.25, 0.5, 1, 2, 3, 4]
-            for h in possible_harmonics:
-                harmonic_checker = ((np.abs(best_period_PDCSAP-(h*tls_period)))/best_period_PDCSAP)*100
-                if harmonic_checker <= 1:
-                    ticker = False
-                    harmonic = h
-                    break
-
-            # no need for a try and except here because only working tls algorithms will fall down this path since they are in high
-            # sde tic ids
-
-            ''' PLOTTING RAW DATA FIRST '''
-
-            fig3, axs3 = plt.subplots(nrows =3 , figsize = (6,10), sharex = True)
-            plt.subplots_adjust(hspace = 0.3)
-            axs3[0].scatter(time, sap_flux, c='k', s= 0.8, label = 'SAP')
-            axs3[1].scatter(time, pdcsap_flux, c = 'k', s= 0.8, label = 'PDCSAP')
-            axs3[2].scatter(time, bkgd, c = 'k', s = 0.8, label = 'BKGD')
-            axs3[0].set_title(f" RAW DATA FOR TIC {tic_id}")
-
-
-            ''' PLOTTING BINNED DATA '''
-
-            fig, axs = plt.subplots(nrows=6, figsize=(12,18))
-            plt.subplots_adjust(hspace=0.3)
-            axs[0].scatter(sap_time_binned, sap_flux_binned, c='k', zorder = 2, s=0.8, label = 'SAP')
-            axs[0].set_ylabel("SAP", fontsize = 8 )
-            axs[0].set_title(f"TIC {tic_id} — TESS mag = {tessmag} at Temp = {tempeff} Binned to 30 minutes", fontsize=8)
-
-            axs[1].scatter(pdc_time_binned, pdc_flux_binned, c='k', zorder = 2, s=0.8, label = 'PDCSAP')
-            axs[1].set_ylabel("PDCSAP", fontsize = 8)
-
-
-            ''' PLOTTING LOMBSCARGLE PERIODOGRAM '''
-            
-            axs[2].plot(frequency_SAP, power_SAP, label = 'SAP LS')
-            axs[2].set_ylabel("Power", fontsize = 8)
-            axs[2].set_xlabel('Frequency', fontsize = 8)
-
-            axs[3].plot(frequency_PDCSAP, power_PDCSAP, label = 'PDC LS')
-            axs[3].set_ylabel("Power", fontsize = 8)
-            axs[3].set_xlabel('Frequency', fontsize = 8)
-
-            axs[2].set_xscale('log')  # For SAP
-            axs[3].set_xscale('log')  # For PDCSAP
-
-
-            # keeping the sap cutoff for the pdc_sap cutoff since they should be about the same when considering flares, wouldn't change much i believe
-            for i in range(len(axs)):
-                if i < 2 or i > 3:
-                # initially had put the q1, q3 and everything here, caused such problems
-                    axs[i].set_xlim(time.min()-2, time.max())
-                else:
-                    axs[i].set_xlim(0,20)
-                    # I set the axis limit at 20 because it was catching another rotation period at about 0.02 days, which was a little crazy for the 
-                    # that 0.02 thing I saw was the binning cadence signal which is okay to mask
-                    # lightcurve
+                except ValueError as e:
+                    DEBUG and print(f"TIC {tic_id}: TLS failed with error: {e}")
+                    with open(failed_tics_path, "a") as failfile:
+                        failfile.write(f"{tic_id}\n")
                     continue
 
-                #ax.set_ylim([0, upper_bound])
-        
-            '''PLOTTING PHASE FOLDED TO ONE PERIOD '''
 
-            fig_phase, axs_phase = plt.subplots(2, figsize=(10, 8), sharex=True)
-            plt.subplots_adjust(hspace=0.3)
-            axs_phase[0].scatter(sap_phase, sap_flux_binned, s=0.5, c='black', label='SAP Phase Folded')
-            axs_phase[0].set_ylabel("Flux")
-            axs_phase[0].set_title(f"TIC {tic_id} — SAP Phase Folded at {best_period_SAP:.4f} d") # four decimal places rounded 
-            axs_phase[0].legend()
-
-            axs_phase[1].scatter(pdcsap_phase, pdc_flux_binned, s=0.5, c='black', label='PDCSAP Phase Folded')
-            axs_phase[1].set_xlabel("Phase")
-            axs_phase[1].set_ylabel("Flux")
-            axs_phase[1].set_title(f"TIC {tic_id} — PDCSAP Phase Folded at {best_period_PDCSAP:.4f} d") # 4 decimal places round
-            axs_phase[1].legend()
-
-            plt.close(fig_phase)
-
-
-            ''' PLOTTING WOTAN FLATTENING CURVE '''
-
-            axs[0].plot(time, trend_lc1, linewidth = 1.5, zorder = 1, color = 'red')
-            axs[1].plot(time, trend_lc2, linewidth = 1.5, zorder = 1, color = 'red')
-
-            axs[4].scatter(time, flatten_lc1, s=1, color='black', label = 'Flattened SAP')
-            axs[5].scatter(time, flatten_lc2, s = 1, color = 'black', label = 'Flattened PDCSAP')
-
-            for ax in axs:
-                ax.legend()
-
-            # Plot blue triangles at each expected transit time
-            for t in visible_transits:
-                axs[5].scatter(t, y_marker, marker='^', color='blue', s=20, zorder=3, label='Transit time' if t==visible_transits[0] else "")
-                axs[1].scatter(t, y_marker, marker = '^', color = 'blue', s=20, zorder=3, label='Transit time' if t == visible_transits[0] else "")
-
-
-            if not ticker:
-                axs[1].set_title(f"Prot is {harmonic:.2f}x of Porb ", color = "red")
-            else:
-                axs[1].set_title(f"Prot is not a harmonic of Porb, Potential Planetary Signal")
-  
-            #fig.savefig(savpath, bbox_inches='tight', format = "pdf")
-            plt.close(fig)
-
-            ''' PLOTTING TLS '''
-
-            figure2, axs2 = plt.subplots(nrows = 2, figsize = (10,12))
-            plt.subplots_adjust(hspace=0.3)
-
-            # whats the TLS found orbiital period 
+            if make_plots:
                 
-            period1 = results1.period
-            sde1 = results1.SDE
+                if not unvetted_tic(tic_id, detrend, sector_number, wdwstr): # we are only trying to plot files which are not found in 
+                #other highsdetic files, i.e., haven't already been run and found/detected/vetted
+                    continue
 
-            period2 = results2.period
-            sde2 = results2.SDE
+                results1 = model1.power(period_min = min_period, period_max = max_period) # now inputting minimum and maximum period to try and fix valueError of empty TLS
+                results2 = model2.power(period_min = min_period, period_max = max_period)
 
-            periods = results2.periods
-            power = results2.power
+                # Predict transit times using TLS results
+                tls_period = results2.period
+                tls_t0 = results2.T0
 
-            f = plt.figure(figsize=(10, 5))
-            plt.plot(periods, power, color='black')
-            plt.xlabel("Trial Period (days)")
-            plt.ylabel("TLS Power (SDE)")
-            plt.title("TLS Detection Spectrum")
-            plt.grid(True)
-            plt.close()
+                # Compute all expected transit times within observed time span
+                epochs = np.arange(-1000, 1000)
+                transit_times = tls_t0 + (tls_period * epochs)
+                # Compute a y-position slightly below the light curve's minimum flux
+                y_marker = np.nanmin(flatten_lc2) - 0.005  # or adjust the offset
+
+                # Only keep transits that fall within your light curve time span
+                in_transit = (transit_times > pdc_time_binned.min()) & (transit_times < pdc_time_binned.max())
+                visible_transits = transit_times[in_transit]
+                ticker = True
+                harmonic = 0
+                possible_harmonics = [0.25, 0.5, 1, 2, 3, 4]
+                for h in possible_harmonics:
+                    harmonic_checker = ((np.abs(best_period_PDCSAP-(h*tls_period)))/best_period_PDCSAP)*100
+                    if harmonic_checker <= 1:
+                        ticker = False
+                        harmonic = h
+                        break
+
+                # no need for a try and except here because only working tls algorithms will fall down this path since they are in high
+                # sde tic ids
+
+                ''' PLOTTING RAW DATA FIRST '''
+
+                fig3, axs3 = plt.subplots(nrows =3 , figsize = (6,10), sharex = True)
+                plt.subplots_adjust(hspace = 0.3)
+                axs3[0].scatter(time, sap_flux, c='k', s= 0.8, label = 'SAP')
+                axs3[1].scatter(time, pdcsap_flux, c = 'k', s= 0.8, label = 'PDCSAP')
+                axs3[2].scatter(time, bkgd, c = 'k', s = 0.8, label = 'BKGD')
+                axs3[0].set_title(f" RAW DATA FOR TIC {tic_id}")
+
+
+                ''' PLOTTING BINNED DATA '''
+
+                fig, axs = plt.subplots(nrows=6, figsize=(12,18))
+                plt.subplots_adjust(hspace=0.3)
+                axs[0].scatter(sap_time_binned, sap_flux_binned, c='k', zorder = 2, s=0.8, label = 'SAP')
+                axs[0].set_ylabel("SAP", fontsize = 8 )
+                axs[0].set_title(f"TIC {tic_id} — TESS mag = {tessmag} at Temp = {tempeff} Binned to 30 minutes", fontsize=8)
+
+                axs[1].scatter(pdc_time_binned, pdc_flux_binned, c='k', zorder = 2, s=0.8, label = 'PDCSAP')
+                axs[1].set_ylabel("PDCSAP", fontsize = 8)
+
+
+                ''' PLOTTING LOMBSCARGLE PERIODOGRAM '''
                 
-            axs2[0].scatter(results1.folded_phase, results1.folded_y, marker = 'o', s = 0.25, color = 'black', label = f'DELTABIC phase-folded\nTLS Period = {period1:.4f} d\nSDE = {sde1:.2f}')
-            axs2[0].plot(results1.model_folded_phase, results1.model_folded_model, color = 'red', label = 'TLS MODEL for DELTABIC')
-            axs2[0].set_title(f" TLS result algorithm on TIC {tic_id}")
-            axs2[1].scatter(results2.folded_phase, results2.folded_y, marker = 'o', s = 0.25, color = 'black', label = f'Flattened Flux phase-folded\nTLS Period = {period2:.4f} d\nSDE = {sde2:.2f}')
-            axs2[1].plot(results2.model_folded_phase, results2.model_folded_model, color = 'red', label = 'TLS MODEL for Flattened Flux')
+                axs[2].plot(frequency_SAP, power_SAP, label = 'SAP LS')
+                axs[2].set_ylabel("Power", fontsize = 8)
+                axs[2].set_xlabel('Frequency', fontsize = 8)
 
-            #savpath2 = f"/home/gurmeher/gurmeher/detrending/TLS_TIC_{tic_id}.pdf"
-            for ax in axs2:
-                ax.legend()
+                axs[3].plot(frequency_PDCSAP, power_PDCSAP, label = 'PDC LS')
+                axs[3].set_ylabel("Power", fontsize = 8)
+                axs[3].set_xlabel('Frequency', fontsize = 8)
 
-            #figure2.savefig(savpath2, bbox_inches ='tight', format = 'pdf')
-            plt.close(figure2)
+                axs[2].set_xscale('log')  # For SAP
+                axs[3].set_xscale('log')  # For PDCSAP
 
 
+                # keeping the sap cutoff for the pdc_sap cutoff since they should be about the same when considering flares, wouldn't change much i believe
+                for i in range(len(axs)):
+                    if i < 2 or i > 3:
+                    # initially had put the q1, q3 and everything here, caused such problems
+                        axs[i].set_xlim(time.min()-2, time.max())
+                    else:
+                        axs[i].set_xlim(0,20)
+                        # I set the axis limit at 20 because it was catching another rotation period at about 0.02 days, which was a little crazy for the 
+                        # that 0.02 thing I saw was the binning cadence signal which is okay to mask
+                        # lightcurve
+                        continue
 
-
-            with PdfPages(outpath) as pdf:
-
-                # Save first figure as page 1
-                pdf.savefig(fig, bbox_inches='tight')
-                plt.close(fig)
+                    #ax.set_ylim([0, upper_bound])
             
-                # Saving figure as page 2
-                pdf.savefig(fig_phase, bbox_inches = 'tight')
+                '''PLOTTING PHASE FOLDED TO ONE PERIOD '''
+
+                fig_phase, axs_phase = plt.subplots(2, figsize=(10, 8), sharex=True)
+                plt.subplots_adjust(hspace=0.3)
+                axs_phase[0].scatter(sap_phase, sap_flux_binned, s=0.5, c='black', label='SAP Phase Folded')
+                axs_phase[0].set_ylabel("Flux")
+                axs_phase[0].set_title(f"TIC {tic_id} — SAP Phase Folded at {best_period_SAP:.4f} d") # four decimal places rounded 
+                axs_phase[0].legend()
+
+                axs_phase[1].scatter(pdcsap_phase, pdc_flux_binned, s=0.5, c='black', label='PDCSAP Phase Folded')
+                axs_phase[1].set_xlabel("Phase")
+                axs_phase[1].set_ylabel("Flux")
+                axs_phase[1].set_title(f"TIC {tic_id} — PDCSAP Phase Folded at {best_period_PDCSAP:.4f} d") # 4 decimal places round
+                axs_phase[1].legend()
+
                 plt.close(fig_phase)
 
-                # Save figure as page 3
-                pdf.savefig(fig3, bbox_inches = 'tight')
-                plt.close(fig3)
 
-                # Save figure as page 4
-                pdf.savefig(figure2, bbox_inches='tight')
+                ''' PLOTTING WOTAN FLATTENING CURVE '''
+
+                axs[0].plot(time, trend_lc1, linewidth = 1.5, zorder = 1, color = 'red')
+                axs[1].plot(time, trend_lc2, linewidth = 1.5, zorder = 1, color = 'red')
+
+                axs[4].scatter(time, flatten_lc1, s=1, color='black', label = 'Flattened SAP')
+                axs[5].scatter(time, flatten_lc2, s = 1, color = 'black', label = 'Flattened PDCSAP')
+
+                for ax in axs:
+                    ax.legend()
+
+                # Plot blue triangles at each expected transit time
+                for t in visible_transits:
+                    axs[5].scatter(t, y_marker, marker='^', color='blue', s=20, zorder=3, label='Transit time' if t==visible_transits[0] else "")
+                    axs[1].scatter(t, y_marker, marker = '^', color = 'blue', s=20, zorder=3, label='Transit time' if t == visible_transits[0] else "")
+
+
+                if not ticker:
+                    axs[1].set_title(f"Prot is {harmonic:.2f}x of Porb ", color = "red")
+                else:
+                    axs[1].set_title(f"Prot is not a harmonic of Porb, Potential Planetary Signal")
+    
+                #fig.savefig(savpath, bbox_inches='tight', format = "pdf")
+                plt.close(fig)
+
+                ''' PLOTTING TLS '''
+
+                figure2, axs2 = plt.subplots(nrows = 2, figsize = (10,12))
+                plt.subplots_adjust(hspace=0.3)
+
+                # whats the TLS found orbiital period 
+                    
+                period1 = results1.period
+                sde1 = results1.SDE
+
+                period2 = results2.period
+                sde2 = results2.SDE
+
+                periods = results2.periods
+                power = results2.power
+
+                f = plt.figure(figsize=(10, 5))
+                plt.plot(periods, power, color='black')
+                plt.xlabel("Trial Period (days)")
+                plt.ylabel("TLS Power (SDE)")
+                plt.title("TLS Detection Spectrum")
+                plt.grid(True)
+                plt.close()
+                    
+                axs2[0].scatter(results1.folded_phase, results1.folded_y, marker = 'o', s = 0.25, color = 'black', label = f'DELTABIC phase-folded\nTLS Period = {period1:.4f} d\nSDE = {sde1:.2f}')
+                axs2[0].plot(results1.model_folded_phase, results1.model_folded_model, color = 'red', label = 'TLS MODEL for DELTABIC')
+                axs2[0].set_title(f" TLS result algorithm on TIC {tic_id}")
+                axs2[1].scatter(results2.folded_phase, results2.folded_y, marker = 'o', s = 0.25, color = 'black', label = f'Flattened Flux phase-folded\nTLS Period = {period2:.4f} d\nSDE = {sde2:.2f}')
+                axs2[1].plot(results2.model_folded_phase, results2.model_folded_model, color = 'red', label = 'TLS MODEL for Flattened Flux')
+
+                #savpath2 = f"/home/gurmeher/gurmeher/detrending/TLS_TIC_{tic_id}.pdf"
+                for ax in axs2:
+                    ax.legend()
+
+                #figure2.savefig(savpath2, bbox_inches ='tight', format = 'pdf')
                 plt.close(figure2)
 
-                pdf.savefig(f, bbox_inches='tight')
-                plt.close(f)
-    
-            
+
+
+
+                with PdfPages(outpath) as pdf:
+
+                    # Save first figure as page 1
+                    pdf.savefig(fig, bbox_inches='tight')
+                    plt.close(fig)
+                
+                    # Saving figure as page 2
+                    pdf.savefig(fig_phase, bbox_inches = 'tight')
+                    plt.close(fig_phase)
+
+                    # Save figure as page 3
+                    pdf.savefig(fig3, bbox_inches = 'tight')
+                    plt.close(fig3)
+
+                    # Save figure as page 4
+                    pdf.savefig(figure2, bbox_inches='tight')
+                    plt.close(figure2)
+
+                    pdf.savefig(f, bbox_inches='tight')
+                    plt.close(f)
+        
+                
 
 
 
