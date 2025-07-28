@@ -33,6 +33,272 @@ from matplotlib.backends.backend_pdf import PdfPages
 '''***IMPORTANT*** REMEMBER! --> WHENEVER YOU ARE USING A NEW SLIDER, 
 OR THE NOTCH METHOD, JUST CREATE THE SUBDIRECTORY BEFORE YOU RUN THE CODE!'''
 
+# 28th July
+# Making the NOTCH part of this program since we now have the notch implementation semi complete.
+
+
+'''FUNCTIONS *ONLY* FOR NOTCH IMPLEMENTATION BEGINNING'''
+def create_downlink_mask(
+    time: np.ndarray,
+    gap_threshold: float = 1.0,
+    pre_gap_window: float = 0.5,
+    post_gap_window: float = 0.5): # returns an np.ndarray
+    """
+    Creates a boolean mask to find & ignore data points immediately
+    preceding and proceeding a "significant" data gap, the significance 
+    is mentioned in the arguments section.
+
+    I did this mainly because as mentioned in the main NOTCHBINNED.py code, 
+    TLS isnt detecting the planet transit, but artificial transits
+    created due to data downlinks --> big problem --> similar to what wotan 
+    did in many cases, maybe jumped over possible other transits
+    in a similar fashion/way --> i remember trying to find a way to remove 
+    these earlier, just to remove any dips near data downtime regions,
+    but i couldnt figure out a way to do this, maybe talk to luke about this.
+    I found a way to do it but it is a little iffy right now
+
+    I also want to point out that I most likely will not be using this method in
+    the final implementation as I would rather have extra graphs to manually vet 
+    than my process skipping over potential transits due to the removal of points.
+    Additionally, This process is *NOT* for *WOTAN* since I am not using wotan on 
+    binned data. This process is mainly for *NOTCH* because it works on binned data
+    which can be sensitive to artifact sampling. Therefore, you will only see this 
+    function being used in the notch detrending method of the algorithm. 
+
+    Formal Parameters:
+        time (np.ndarray): The array of time values for the light curve.
+        gap_threshold (float): The minimum time difference (in days)
+            to be considered a data gap. TESS gaps can
+            be > 1 day. Defaults to 0.5.
+        pre_gap_window (float): The duration of the window (in days)
+            BEFORE a gap to be masked. Messing around with this, i think 0.5 was ifne
+        post_gap_window (float, optional): Same but post the data gap
+
+    Returns:
+        np.ndarray: A boolean array of the same length as 'time'.
+                    'True' indicates a good data point to keep --> basically not before 
+                    or after a data gap. 'False' means it should be ignored
+                   
+    """
+    # assume all data is good initially, so set -> True
+    mask = np.ones_like(time, dtype=bool)
+
+    
+    # np.diff() returns an array one element shorter, so we prepend 0
+    # so the resulting array has the same # of elements as the `time` 
+    # array and in the same order
+    dt = np.diff(time, prepend=time[0])
+
+    # Now trying to find the indices where a data gap begins
+    # A large dt at index i means time[i] is the first point AFTER the gap
+    # The point BEFORE the gap is at index i-1
+    gap_index = np.where(dt > gap_threshold)[0] # accesing first element of the tuple, which just contains array for indices
+
+    if gap_index.size == 0: # basically no elements in the array
+        print("No significant data gaps found.")
+        return mask
+
+    print(f"Found {len(gap_index)} data gap(s). Masking pre-/post-gap windows")
+
+    # For each gap found, we can mask the data in the window preceding and proceeding it
+    for indx in gap_index:
+        '''Masking the window BEFORE the gap'''
+
+        last_point_before_gap_time = time[indx - 1]
+        pre_window_start = last_point_before_gap_time - pre_gap_window # this pre gap window is susceptible 
+        # to change acc to what we set it
+        pre_window_end = last_point_before_gap_time
+        
+        points_to_mask_pre = (time >= pre_window_start) & (time <= pre_window_end)
+        mask[points_to_mask_pre] = False
+        print(f"Masking PRE-gap data between T={pre_window_start:.3f} and T={pre_window_end:.3f}")
+
+        '''Masking the window AFTER the gap'''
+        # same thing but now we add, kinda like the window slider code in many ways
+        first_point_after_gap_time = time[indx]
+        post_window_start = first_point_after_gap_time
+        post_window_end = first_point_after_gap_time + post_gap_window
+
+        points_to_mask_post = (time >= post_window_start) & (time <= post_window_end)
+        mask[points_to_mask_post] = False
+        print(f"Masking POST-gap data between T={post_window_start:.3f} and T={post_window_end:.3f}")
+        print("dt values >", gap_threshold, ":", dt[dt > gap_threshold])
+        print("Corresponding indices:", np.where(dt > gap_threshold)[0])
+    return mask
+
+def count_points_per_window(time, window_length): # to do the data downlink cleaning 
+    half_window = window_length / 2
+    counts = []
+
+    for t in time:
+        in_window = (time >= t - half_window) & (time <= t + half_window)
+        counts.append(np.sum(in_window))
+
+    return np.array(counts)
+
+def clipit(data, low, high, method, center):
+    """Clips data in the current segment"""
+
+    # For the center point, take the median (if center_code==0), else the mean
+    if center == 'mad':
+        mid = np.nanmedian(data)
+    else:
+        mid = np.nanmean(data)
+    data = np.nan_to_num(data)
+    diff = data - mid
+
+    if method == 'median':
+        cutoff = np.nanmedian(np.abs(data - mid))
+    else:
+        cutoff = np.nanstd(data)
+
+    # Clip values high (low) times the threshold (in MAD or STDEV)
+    data[diff > high * cutoff] = np.nan
+    data[diff < -low * cutoff] = np.nan
+    return data
+
+def slide_clip(time, data, window_length, low=3, high=3, method=None, center=None): # FUNCTION IS FROM WOTAN PACKAGE 
+    """Sliding time-windowed outlier clipper.
+
+    Parameters
+    ----------
+    time : array-like
+        Time values
+    flux : array-like
+        Flux values for every time point
+    window_length : float
+        The length of the filter window in units of ``time`` (usually days)
+    low : float or int
+        Lower bound factor of clipping. Default is 3.
+    high : float or int
+        Lower bound factor of clipping. Default is 3.
+    method : ``mad`` (median absolute deviation; default) or ``std`` (standard deviation)
+        Outliers more than ``low`` and ``high`` times the ``mad`` (or the ``std``) from
+        the middle point are clipped
+    center : ``median`` (default) or ``mean``
+        Method to determine the middle point
+
+    Returns
+    -------
+
+    clipped : array-like
+        Input array with clipped elements replaced by ``NaN`` values.
+    """
+
+    if method is None:
+        method = 'mad'
+    if center is None:
+        center = 'median'
+
+    low_index = np.min(time)
+    hi_index = np.max(time)
+    idx_start = 0
+    idx_end = 0
+    size = len(time)
+    half_window = window_length / 2
+    clipped_data = np.full(size, np.nan)
+    for i in range(size-1):
+        if time[i] > low_index and time[i] < hi_index:
+            # Nice style would be:
+            #   idx_start = numpy.argmax(time > time[i] - window_length/2)
+            #   idx_end = numpy.argmax(time > time[i] + window_length/2)
+            # But that's too slow (factor 10). Instead, we write:
+            while time[idx_start] < time[i] - half_window:
+                idx_start += 1
+            while time[idx_end] < time[i] + half_window and idx_end < size-1:
+                idx_end += 1
+            # Clip the current sliding segment
+            clipped_data[idx_start:idx_end] = clipit(
+                data[idx_start:idx_end], low, high, method, center)
+    return clipped_data
+
+def _run_notch(TIME, FLUX, dtr_dict, verbose=False): # KEEP VERBOSE FALSE because we dont have logging imported
+
+    from notch_and_locor.core import sliding_window
+
+    #
+    # HARD-CODE notch options (nb. could also let them be options via
+    # dtr_dict).
+    #
+    # Set to True to do a full fit over time and arclength (default False).
+    use_arclength = False
+    # Internally, keep as "False" to use wdat.fcor as the flux.
+    use_raw = False
+    # BIC difference between transit and no-transit model required to
+    # select the transit model
+    min_deltabic = -1.0
+    # By default (resolvabletrans == False), a grid of transit durations is
+    # searched. [0.75, 1.0, 2.0, 4.0] hours.  If this is set to be True,
+    # the 45 minute one is dropped.
+    resolvable_trans = False
+    # show_progress: if True, puts out a TQDM bar
+    show_progress = verbose
+
+    # Format "data" into recarray format needed for notch.
+    N_points = len(TIME)
+    data = np.recarray(
+        (N_points,),
+        dtype=[('t',float), ('fraw',float), ('fcor',float), ('s',float),
+               ('qual',int), ('divisions',float)]
+    )
+    data.t = TIME
+    data.fcor = FLUX
+    data.fraw[:] = 0
+    data.s[:] = 0
+    data.qual[:] = 0
+
+    # Run notch
+    if verbose:
+        LOGINFO('Beginning notch run...')
+    
+    fittimes, depth, detrend, polyshape, badflag = (
+        sliding_window(
+            data, windowsize=dtr_dict['window_length'],
+            use_arclength=use_arclength, use_raw=use_raw,
+            deltabic=min_deltabic, resolvable_trans=resolvable_trans,
+            show_progress=show_progress
+        )
+    )
+    print("depth[1] (deltabic) summary:")
+    print("min:", np.nanmin(depth[1]))
+    print("max:", np.nanmax(depth[1]))
+    print("unique values:", np.unique(depth[1]))
+    if verbose:
+        LOGINFO('Completed notch run.')
+
+    assert len(fittimes) == len(TIME)
+
+    # Store everything in a common format recarray
+    N_points = len(detrend)
+    notch = np.recarray(
+        (N_points, ), dtype=[
+            ('t', float), ('detrend', float), ('polyshape', float),
+            ('notch_depth', float), ('deltabic', float), ('bicstat', float),
+            ('badflag', int)
+        ]
+    )
+
+    notch.t = data.t
+    notch.notch_depth = depth[0].copy()
+    notch.deltabic    = depth[1].copy()
+    notch.detrend     = detrend.copy()
+    notch.badflag     = badflag.copy()
+    notch.polyshape   = polyshape.copy()
+
+    bicstat = notch.deltabic-np.median(notch.deltabic)
+    notch.bicstat = 1- bicstat/np.max(bicstat)
+
+    #
+    # Convert to my naming scheme.
+    #
+    flat_flux = notch.detrend
+    trend_flux = notch.polyshape
+
+    return flat_flux, trend_flux, notch
+
+'''FUNCTIONS *ONLY* FOR NOTCH IMPLEMENTATION END'''
+
+
 
 def unvetted_tic(tic_id, detrend, sector_number, wdwstr):
     tic_id = str(tic_id)
@@ -130,7 +396,7 @@ def bin_lightcurve(time, flux, bin_minutes=30):
 
     return np.array(binned_time), np.array(binned_flux)
 
-def pipeline(detrender, sect_no, wdwle, make_plots = True):
+def pipeline(detrender, sect_no, wdwle, make_plots = False):
     "IMPORTED EVERYTHING OUTSIDE NOW THAT I'M CHUNKING EVERYTHING"
     sector_number = sect_no
     sector_str = str(sect_no)
@@ -241,22 +507,60 @@ def pipeline(detrender, sect_no, wdwle, make_plots = True):
             # changing the wotan flattening to the entire data, not just binned to preserve SNR!
             flatten_lc1, trend_lc1 = flatten(time, sap_flux/np.nanmedian(sap_flux), window_length = wdwl, return_trend = True, method = 'biweight')
             flatten_lc2, trend_lc2 = flatten(time, pdcsap_flux/np.nanmedian(pdcsap_flux), window_length = wdwl, return_trend = True, method = 'biweight')
+
         elif detrend.lower() == "notch":
-            continue
+            '''
+            Inputting Notch Implementation, which works a little differently
+            It isn't blackboxed as a package on wotan. The implemenetation aspect has
+            been done manually using Rizzuto+2017's method along with the process being
+            forked as a package by Luke Bouma on git.
+
+            Important to note that notch doesn't have varying window length, i.e., we aren't 
+            testing different windows, so the file structure in results will be different and something
+            we will have to change particularly for notch
+            
+            Also, in the NOTCH implementation, we will only be dealing with PDCSAP, no SAP!
+            '''
+            if best_period_PDCSAP > 2:
+                dictionary = {"window_length" : 1}
+            else:
+                dictionary = {"window_length" : 0.5}
+
+            clipped_flux = slide_clip(
+            pdc_time_binned, pdc_flux_binned, window_length=dictionary['window_length'],
+            low=100, high=2, method='mad', center='median') # extra clipping for NOTCH, from the wotan code
+
+            sel = np.isfinite(pdc_time_binned) & np.isfinite(clipped_flux)
+            pdc_time_binned = pdc_time_binned[sel]
+            pdc_flux_binned = 1.* clipped_flux[sel]
+            assert len(pdc_time_binned) == len(pdc_flux_binned)
+
+            downtimemask = create_downlink_mask(pdc_time_binned)
+            pdc_time_binned = pdc_time_binned[downtimemask]
+            pdc_flux_binned = pdc_flux_binned[downtimemask]
+
+            flatten_lc2, trend_lc2, notch = _run_notch(pdc_time_binned, pdc_flux_binned/np.nanmedian(pdc_flux_binned), dictionary)
+
+            delbic = notch.deltabic * -1
+            delbic = delbic/np.nanmedian(delbic)
+
+            flatten_lc1 = delbic # for naming consistency for plotting
+
+            # continue
         
 
         ''' NOW WE DO THE TLS PHASE FOLDING AND PLOTTING ON A NEW GRAPH '''
         sap_time_clean, flatten_lc1_clean = clean_arrays(time, flatten_lc1)
         pdc_time_clean, flatten_lc2_clean = clean_arrays(time, flatten_lc2)
 
-        DEBUG and print(f"TIC {tic_id}: SAP clean time length = {len(sap_time_clean)}, flatten length = {len(flatten_lc1_clean)}")
+        DEBUG and print(f"TIC {tic_id}: SAP/DELBIC clean time length = {len(sap_time_clean)}, flatten length = {len(flatten_lc1_clean)}")
         DEBUG and print(f"TIC {tic_id}: PDCSAP clean time length = {len(pdc_time_clean)}, flatten length = {len(flatten_lc2_clean)}")
 
-        DEBUG and print(f"TIC {tic_id}: SAP clean time NaNs = {np.isnan(sap_time_clean).sum()}, flatten NaNs = {np.isnan(flatten_lc1_clean).sum()}")
+        DEBUG and print(f"TIC {tic_id}: SAP/DELBIC clean time NaNs = {np.isnan(sap_time_clean).sum()}, flatten NaNs = {np.isnan(flatten_lc1_clean).sum()}")
         DEBUG and print(f"TIC {tic_id}: PDCSAP clean time NaNs = {np.isnan(pdc_time_clean).sum()}, flatten NaNs = {np.isnan(flatten_lc2_clean).sum()}")
 
         if len(sap_time_clean) == 0 or len(flatten_lc1_clean) == 0:
-            DEBUG and print(f"TIC {tic_id}: Empty SAP arrays for TLS.")
+            DEBUG and print(f"TIC {tic_id}: Empty SAP/DELBIC arrays for TLS.")
         
 
         if len(pdc_time_clean) == 0 or len(flatten_lc2_clean) == 0:
@@ -268,6 +572,7 @@ def pipeline(detrender, sect_no, wdwle, make_plots = True):
 
             # not skipping them now though, i will let them go into the exception error and be saved in the failedtics.txt list
         
+        # TO ADD MODELS ACCORDING TO THE DETRENDER CHOSEN!
         model1 = transitleastsquares(sap_time_clean, flatten_lc1_clean)
         model2 = transitleastsquares(pdc_time_clean, flatten_lc2_clean)
 
