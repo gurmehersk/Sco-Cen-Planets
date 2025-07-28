@@ -13,13 +13,41 @@ from wotan import flatten
 from transitleastsquares import transitleastsquares
 from matplotlib.backends.backend_pdf import PdfPages
 # import logging
+
+#9th July
 # creating a rapid rotators text file right now to just ensure whether all stars are actually undergoing processing.
 
+
+#11th July
 # create a subdirectory for everything for the windowlength as well. --> add this 
 # create a subdirectory for the method wotan vs notch as well.
 
+#22nd July
+# Need to try to be able to only get unique new tics from new slider method.
+# create a new checker where if the tic id is not in any of the other different windows same sector highsdetic.txt file
+# only then add this tic and then analyze it. 
+# did not do this for 30, but gonna do it for 20, and 10 
+
+# 22nd July
+# TO DO: Once the pickle files are generated, run the mainlc runs, ie makeplots = True for windowlengths 10 and 20! 
 '''***IMPORTANT*** REMEMBER! --> WHENEVER YOU ARE USING A NEW SLIDER, 
 OR THE NOTCH METHOD, JUST CREATE THE SUBDIRECTORY BEFORE YOU RUN THE CODE!'''
+
+
+def unvetted_tic(tic_id, detrend, sector_number, wdwstr):
+    tic_id = str(tic_id)
+    window_length = ["10","15","20","30"]
+    other_windows = [w for w in window_length if w != wdwstr]
+    for i in other_windows:
+        path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/"+detrend+"/window"+ i +f"/mainlc/sector{sector_number}/highsdetic10.txt"
+        existing_tics = set()
+        with open(path, "r") as f:
+            existing_tics = set(line.strip() for line in f)
+        if  tic_id in existing_tics:
+            return False
+        else:
+            continue
+    return True
 
 
 def clean_arrays(time, flux):
@@ -84,8 +112,6 @@ def get_this_sectors_ticids(make_plots, sector_number, detrend, wdwstr):
         # ...
     return ticids
 
-# i get that this makes the tic list
-
 def bin_lightcurve(time, flux, bin_minutes=30):
     '''BINNING TO 30 MINUTES'''
     bin_size = bin_minutes / (24 * 60)  # minutes to days
@@ -104,7 +130,7 @@ def bin_lightcurve(time, flux, bin_minutes=30):
 
     return np.array(binned_time), np.array(binned_flux)
 
-def pipeline(detrender, sect_no, wdwle, make_plots = False):
+def pipeline(detrender, sect_no, wdwle, make_plots = True):
     "IMPORTED EVERYTHING OUTSIDE NOW THAT I'M CHUNKING EVERYTHING"
     sector_number = sect_no
     sector_str = str(sect_no)
@@ -300,6 +326,10 @@ def pipeline(detrender, sect_no, wdwle, make_plots = False):
 
 
         if make_plots:
+            
+            if not unvetted_tic(tic_id, detrend, sector_number, wdwstr): # we are only trying to plot files which are not found in 
+            #other highsdetic files, i.e., haven't already been run and found/detected/vetted
+                continue
 
             results1 = model1.power(period_min = min_period, period_max = max_period) # now inputting minimum and maximum period to try and fix valueError of empty TLS
             results2 = model2.power(period_min = min_period, period_max = max_period)
@@ -447,11 +477,11 @@ def pipeline(detrender, sect_no, wdwle, make_plots = False):
             plt.grid(True)
             plt.close()
                 
-            axs2[0].scatter(results1.folded_phase, results1.folded_y, marker = 'o', s = 0.25, color = 'black', label = f'SAP phase-folded\nTLS Period = {period1:.4f} d\nSDE = {sde1:.2f}')
-            axs2[0].plot(results1.model_folded_phase, results1.model_folded_model, color = 'red', label = 'TLS MODEL for SAP Flux')
+            axs2[0].scatter(results1.folded_phase, results1.folded_y, marker = 'o', s = 0.25, color = 'black', label = f'DELTABIC phase-folded\nTLS Period = {period1:.4f} d\nSDE = {sde1:.2f}')
+            axs2[0].plot(results1.model_folded_phase, results1.model_folded_model, color = 'red', label = 'TLS MODEL for DELTABIC')
             axs2[0].set_title(f" TLS result algorithm on TIC {tic_id}")
-            axs2[1].scatter(results2.folded_phase, results2.folded_y, marker = 'o', s = 0.25, color = 'black', label = f'PDCSAP phase-folded\nTLS Period = {period2:.4f} d\nSDE = {sde2:.2f}')
-            axs2[1].plot(results2.model_folded_phase, results2.model_folded_model, color = 'red', label = 'TLS MODEL for PDCSAP Flux')
+            axs2[1].scatter(results2.folded_phase, results2.folded_y, marker = 'o', s = 0.25, color = 'black', label = f'Flattened Flux phase-folded\nTLS Period = {period2:.4f} d\nSDE = {sde2:.2f}')
+            axs2[1].plot(results2.model_folded_phase, results2.model_folded_model, color = 'red', label = 'TLS MODEL for Flattened Flux')
 
             #savpath2 = f"/home/gurmeher/gurmeher/detrending/TLS_TIC_{tic_id}.pdf"
             for ax in axs2:
