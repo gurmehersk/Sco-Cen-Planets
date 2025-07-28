@@ -41,7 +41,7 @@ def create_downlink_mask(
     preceding and proceeding a "significant" data gap, the significance 
     is mentioned in the arguments section.
 
-    I did this mainly because as mentioned in the main NOTCHBINNED code, 
+    I did this mainly because as mentioned in the main NOTCHBINNED.py code, 
     TLS isnt detecting the planet transit, but artificial transits
     created due to data downlinks --> big problem --> similar to what wotan 
     did in many cases, maybe jumped over possible other transits
@@ -65,56 +65,57 @@ def create_downlink_mask(
                     or after a data gap. 'False' means it should be ignored
                    
     """
-    # assume all data is good initially, so set -> True
+    # assume all data is good initially, so set all points mask -> True
     mask = np.ones_like(time, dtype=bool)
 
     
     # np.diff() returns an array one element shorter, so we prepend 0
-    # so the resulting array has the same # of elements as the `time` 
+    # so the resulting array has the same # of elements as the 'time'
     # array and in the same order
     dt = np.diff(time, prepend=time[0])
 
     # Now trying to find the indices where a data gap begins
-    # A large dt at index i means time[i] is the first point AFTER the gap
-    # The point BEFORE the gap is at index i-1
-    gap_indices = np.where(dt > gap_threshold)[0]
+    # A large dt at index i means time[i] is the first point *after* the gap
+    # The point *before* the gap is at index i-1
+    gap_index = np.where(dt > gap_threshold)[0] # accesing first element of the tuple, which just contains array for indices
 
-    if gap_indices.size == 0: # basically no elements in the array
+    if gap_index.size == 0: # basically no elements in the array
         print("No significant data gaps found.")
         return mask
 
-    print(f"Found {len(gap_indices)} data gap(s). Masking pre-/post-gap windows")
+    print(f"Found {len(gap_index)} data gap(s). Masking pre-/post-gap windows")
 
     # For each gap found, we can mask the data in the window preceding and proceeding it
-    for idx in gap_indices:
-        '''Masking the window BEFORE the gap'''
+    for indx in gap_index:
+        '''Masking the window before the gap'''
 
-        last_point_before_gap_time = time[idx - 1]
+        last_point_before_gap_time = time[indx - 1]
         pre_window_start = last_point_before_gap_time - pre_gap_window # this pre gap window is susceptible 
-        # to change acc to what we set it
+        # to change according to what we set it
         pre_window_end = last_point_before_gap_time
         
         points_to_mask_pre = (time >= pre_window_start) & (time <= pre_window_end)
         mask[points_to_mask_pre] = False
         print(f"Masking PRE-gap data between T={pre_window_start:.3f} and T={pre_window_end:.3f}")
 
-        '''Masking the window AFTER the gap'''
+        '''Masking the window after the gap'''
         # same thing but now we add, kinda like the window slider code in many ways
-        first_point_after_gap_time = time[idx]
+        first_point_after_gap_time = time[indx]
         post_window_start = first_point_after_gap_time
         post_window_end = first_point_after_gap_time + post_gap_window
 
         points_to_mask_post = (time >= post_window_start) & (time <= post_window_end)
         mask[points_to_mask_post] = False
         print(f"Masking POST-gap data between T={post_window_start:.3f} and T={post_window_end:.3f}")
-
+        print("dt values >", gap_threshold, ":", dt[dt > gap_threshold])
+        print("Corresponding indices:", np.where(dt > gap_threshold)[0])
     return mask
     
 
 # regularly scheduled code to test whether it has happened or not
 
-tic_id = 166527623
-path = "/home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2023096110322-s0064-0000000166527623-0257-s/tess2023096110322-s0064-0000000166527623-0257-s_lc.fits"
+tic_id = 146520535
+path = "/home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2020324010417-s0032-0000000146520535-0200-s/tess2020324010417-s0032-0000000146520535-0200-s_lc.fits"
 pdfpath = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/scripts/TIC_{tic_id}.pdf"
 
 hdu_list = fits.open(path)
@@ -131,25 +132,52 @@ time_clean = time[mask]
 flux_clean = pdcsap_flux[mask] / np.nanmedian(pdcsap_flux[mask])
 pdc_time_binned, pdc_flux_binned = bin_lightcurve(time_clean, flux_clean)
 
+# 26th July 
+# we gotta keep something like how the gap_threshold value is proportional to the pre_gap and post_gap window
+# ie if the gap_threshold is huge, then the window we clean is bigger than if it is smaller, maybe something to add
+# in a bit
+# current problem, even if its removing it makes it a dip, we want to, instead of removing, change the data points to np.nanmedian(flux)
 downlink_mask = create_downlink_mask(pdc_time_binned, gap_threshold = 1.0, pre_gap_window = 0.5, post_gap_window = 0.5)
+median_flux = np.nanmedian(pdc_flux_binned)
+pdc_flux_cleaned = pdc_flux_binned.copy()  # don't overwrite original just in case
+pdc_flux_cleaned[~downlink_mask] = median_flux
 
-# 3. Visualize the results
+# Visualize the results
 plt.style.use('seaborn-v0_8-white')
 fig, ax = plt.subplots(figsize=(15, 7))
 
 # Plotting all the original data points in a light color
 ax.plot(pdc_time_binned, pdc_flux_binned, 'o', color='lightgray', markersize=3, label='All Data Points')
 
-# Overplotginb the good data points (where mask = True) in a darker color
+# Overplotting the good data points (where mask = True) 
 ax.plot(pdc_time_binned[downlink_mask], pdc_flux_binned[downlink_mask], 'o', color='dodgerblue', markersize=4, label='Good Data (Kept)')
 
-# Highlighting the masked points in red by inverting the mask through the bitwise NOT operator : ~ 
+# Highlighting the masked points in red by inverting the mask through the bitwise NOT operator '~'
 ax.plot(pdc_time_binned[~downlink_mask], pdc_flux_binned[~downlink_mask], 'o', color='crimson', markersize=4, label='Artifact Data (Masked)')
 
+ax.plot(pdc_time_binned, pdc_flux_cleaned, 'o', color = 'green', markersize = 4, label = 'Normalized + PDCFLUXBINNED') 
+
+'''
+I did try the alternative which is to put the data point as 
+np.nanmedian instead of removing it from the mask, but that 
+then causes an abrupt change from where the data point was going down, 
+and then stabilized before the datagap, which wouldn't remove the 
+artifact dip regardless
+
+What I did do, however, is put the TLS spectrum and I just realize that 
+Notch may not be the best detrender for these planets frankly. Check with 
+Luke 
+'''
+
+
 ax.set_title("TESS Pre/Post-Downlink Artifact Masking", fontsize=16)
-ax.set_xlabel("Time (BJD - XXXX)", fontsize=12)
+ax.set_xlabel("Time (BJD)", fontsize=12)
 ax.set_ylabel("Normalized Flux", fontsize=12)
 ax.legend(loc='lower left')
+
+dt_binned = np.diff(pdc_time_binned)
+print(f"Min dt: {np.min(dt_binned):.5f}, Max dt: {np.max(dt_binned):.5f}, Median dt: {np.median(dt_binned):.5f}")
+
 
 
 plt.tight_layout()
