@@ -13,6 +13,11 @@ import numpy.lib.recfunctions as rfn
 from collections import OrderedDict
 from copy import deepcopy
 
+
+# BIC COMPARISON, NOTCH HAS 3 EXTRA PARAMETERS IN ITS FIT
+# BIC = k ln(n)− 2 ln(L) where k = number of parameters, n is number of data points, L is maximum likelihood of model given data
+
+
 # 24th July
 # remove flares
 
@@ -25,6 +30,97 @@ from copy import deepcopy
 # also, it doesn't seem to be too robust, I don't get the hype 
 
 # ADD LS periodogram to be consistent about window length!
+
+def create_downlink_mask(
+    time: np.ndarray,
+    gap_threshold: float = 1.0,
+    pre_gap_window: float = 0.5,
+    post_gap_window: float = 0.5): # returns an np.ndarray
+    """
+    Creates a boolean mask to find & ignore data points immediately
+    preceding and proceeding a "significant" data gap, the significance 
+    is mentioned in the arguments section.
+
+    I did this mainly because as mentioned in the main NOTCHBINNED.py code, 
+    TLS isnt detecting the planet transit, but artificial transits
+    created due to data downlinks --> big problem --> similar to what wotan 
+    did in many cases, maybe jumped over possible other transits
+    in a similar fashion/way --> i remember trying to find a way to remove 
+    these earlier, just to remove any dips near data downtime regions,
+    but i couldnt figure out a way to do this, maybe talk to luke about this.
+    I found a way to do it but it is a little iffy right now
+
+    Formal Parameters:
+        time (np.ndarray): The array of time values for the light curve.
+        gap_threshold (float): The minimum time difference (in days)
+            to be considered a data gap. TESS gaps can
+            be > 1 day. Defaults to 0.5.
+        pre_gap_window (float): The duration of the window (in days)
+            BEFORE a gap to be masked. Messing around with this, i think 0.5 was ifne
+        post_gap_window (float, optional): Same but post the data gap
+
+    Returns:
+        np.ndarray: A boolean array of the same length as 'time'.
+                    'True' indicates a good data point to keep --> basically not before 
+                    or after a data gap. 'False' means it should be ignored
+                   
+    """
+    # assume all data is good initially, so set -> True
+    mask = np.ones_like(time, dtype=bool)
+
+    
+    # np.diff() returns an array one element shorter, so we prepend 0
+    # so the resulting array has the same # of elements as the `time` 
+    # array and in the same order
+    dt = np.diff(time, prepend=time[0])
+
+    # Now trying to find the indices where a data gap begins
+    # A large dt at index i means time[i] is the first point AFTER the gap
+    # The point BEFORE the gap is at index i-1
+    gap_index = np.where(dt > gap_threshold)[0] # accesing first element of the tuple, which just contains array for indices
+
+    if gap_index.size == 0: # basically no elements in the array
+        print("No significant data gaps found.")
+        return mask
+
+    print(f"Found {len(gap_index)} data gap(s). Masking pre-/post-gap windows")
+
+    # For each gap found, we can mask the data in the window preceding and proceeding it
+    for indx in gap_index:
+        '''Masking the window BEFORE the gap'''
+
+        last_point_before_gap_time = time[indx - 1]
+        pre_window_start = last_point_before_gap_time - pre_gap_window # this pre gap window is susceptible 
+        # to change acc to what we set it
+        pre_window_end = last_point_before_gap_time
+        
+        points_to_mask_pre = (time >= pre_window_start) & (time <= pre_window_end)
+        mask[points_to_mask_pre] = False
+        print(f"Masking PRE-gap data between T={pre_window_start:.3f} and T={pre_window_end:.3f}")
+
+        '''Masking the window AFTER the gap'''
+        # same thing but now we add, kinda like the window slider code in many ways
+        first_point_after_gap_time = time[indx]
+        post_window_start = first_point_after_gap_time
+        post_window_end = first_point_after_gap_time + post_gap_window
+
+        points_to_mask_post = (time >= post_window_start) & (time <= post_window_end)
+        mask[points_to_mask_post] = False
+        print(f"Masking POST-gap data between T={post_window_start:.3f} and T={post_window_end:.3f}")
+        print("dt values >", gap_threshold, ":", dt[dt > gap_threshold])
+        print("Corresponding indices:", np.where(dt > gap_threshold)[0])
+    return mask
+    
+
+def count_points_per_window(time, window_length): # to do the data downlink cleaning 
+    half_window = window_length / 2
+    counts = []
+
+    for t in time:
+        in_window = (time >= t - half_window) & (time <= t + half_window)
+        counts.append(np.sum(in_window))
+
+    return np.array(counts)
 
 def clipit(data, low, high, method, center):
     """Clips data in the current segment"""
@@ -242,8 +338,6 @@ flux_clean = pdcsap_flux[mask] / np.nanmedian(pdcsap_flux[mask])
 pdc_time_binned, pdc_flux_binned = bin_lightcurve(time_clean, flux_clean)
 #pdc_time_binned, pdc_flux_binned = bin_lightcurve(time, pdcsap_flux/np.nanmedian(pdcsap_flux))
 #pdc_time_binned, pdc_flux_binned = bin_lightcurve(time, pdcsap_flux)
-fig, axs = plt.subplots(nrows = 5, figsize = (6,10), sharex = False)
-axs[0].scatter(pdc_time_binned, pdc_flux_binned, s = 0.5, zorder = 2, color = 'black')
 
 prot = Lombscargle(pdc_time_binned, pdc_flux_binned)
 cadence = np.nanmedian(np.diff(pdc_time_binned))
@@ -267,7 +361,12 @@ assert len(pdc_time_binned) == len(pdc_flux_binned)
 #print(f"Time length: {len(time)}, Flux length: {len(pdcsap_flux)}")
 #print(f"Valid points: {np.sum(np.isfinite(pdcsap_flux))}")
 
+downtimemask = create_downlink_mask(pdc_time_binned)
+pdc_time_binned = pdc_time_binned[downtimemask]
+pdc_flux_binned = pdc_flux_binned[downtimemask]
 
+fig, axs = plt.subplots(nrows = 6, figsize = (6,10), sharex = False)
+axs[0].scatter(pdc_time_binned, pdc_flux_binned, s = 0.5, zorder = 2, color = 'black')
 #flat_flux, trend_flux, notch = _run_notch(pdc_time_binned, pdc_flux_binned/np.nanmedian(pdc_flux_binned), dictionary)
 flat_flux, trend_flux, notch = _run_notch(pdc_time_binned, pdc_flux_binned/np.nanmedian(pdc_flux_binned), dictionary)
 
@@ -288,19 +387,20 @@ print(f"Any NaNs in time? {np.any(np.isnan(pdc_time_binned))}")
 
 if len(pdc_time_binned) == 0:
     raise ValueError("pdc_time_binned is empty!")
-#model1 = transitleastsquares(pdc_time_binned, delbic)
+    
+model1 = transitleastsquares(pdc_time_binned, delbic)
 model2 = transitleastsquares(pdc_time_binned, flat_flux)
 
 min_period = 0.5  # days, or a bit more than your cadence
 max_period = (pdc_time_binned.max() - pdc_time_binned.min()) / 2
 
-#results1 = model1.power(period_min = min_period, period_max = max_period) # now inputting minimum and maximum period to try and fix valueError of empty TLS
+results1 = model1.power(period_min = min_period, period_max = max_period) # now inputting minimum and maximum period to try and fix valueError of empty TLS
 results2 = model2.power(period_min = min_period, period_max = max_period)
 
-#period1 = results1.period
+period1 = results1.period
 period2 = results2.period
 
-#sde1 = results1.SDE
+sde1 = results1.SDE
 sde2 = results2.SDE
 
 tls_t0 = results2.T0
@@ -315,16 +415,35 @@ y_marker = np.nanmin(flat_flux) - 0.005  # or adjust the offset
 in_transit = (transit_times > pdc_time_binned.min()) & (transit_times < pdc_time_binned.max())
 visible_transits = transit_times[in_transit]
 
-#axs[3].scatter(results1.folded_phase, results1.folded_y, marker = 'o', s = 0.25, color = 'black', label = f'SAP phase-folded\nTLS Period = {period1:.4f} d\nSDE = {sde1:.2f}')
-#axs[3].plot(results1.model_folded_phase, results1.model_folded_model, color = 'red', label = 'TLS MODEL for SAP Flux')
+axs[3].scatter(results1.folded_phase, results1.folded_y, marker = 'o', s = 0.25, color = 'black', label = f'SAP phase-folded\nTLS Period = {period1:.4f} d\nSDE = {sde1:.2f}')
+axs[3].plot(results1.model_folded_phase, results1.model_folded_model, color = 'red', label = 'TLS MODEL for SAP Flux')
 axs[4].scatter(results2.folded_phase, results2.folded_y, marker = 'o', s = 0.25, color = 'black', label = f'PDCSAP phase-folded\nTLS Period = {period2:.4f} d\nSDE = {sde2:.2f}')
 axs[4].plot(results2.model_folded_phase, results2.model_folded_model, color = 'red', label = 'TLS MODEL for PDCSAP Flux')
+periods = results2.periods
+powers = results2.power
+
+axs[5].plot(periods, powers, color='black')
+axs[5].set_xlabel("Trial Period (days)")
+axs[5].set_ylabel("TLS Power (SDE)")
+axs[5].set_title("TLS Detection Spectrum")
 for t in visible_transits:
     axs[0].scatter(t, y_marker, marker='^', color='blue', s=20, zorder=3, label='Transit time' if t==visible_transits[0] else "")
     
+counts = count_points_per_window(pdc_time_binned, dictionary['window_length'])
 
 
+#axs[3].scatter(pdc_time_binned, counts, lw=0.8)
+#axs[3].set_xlabel("Time [days]")
+#axs[3].set_ylabel("# of points in window")
 
+
+print(f"Number of sliding windows used by notch: {len(notch.t)}")
+print(f"NUMBER OF DATA POINTS IN TOTAL: {len(pdc_time_binned)}")
+txtpath = "/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/scripts/timechecker.txt"
+
+with open(txtpath, "w") as f:
+    for i in pdc_time_binned:
+        f.write(str(i) + "\n")
 
 for ax in axs:
     ax.legend()
