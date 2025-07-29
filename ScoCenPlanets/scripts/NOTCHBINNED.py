@@ -12,7 +12,13 @@ from numpy import array as nparr, all as npall, isfinite as npisfinite
 import numpy.lib.recfunctions as rfn
 from collections import OrderedDict
 from copy import deepcopy
+# 28th July post meeting notes 
+# normalize so median is 1, and transits are below 1, but above 0. normalize it using the range
+# and also flip 
+# mask negative bics, where polynomial fits are preferred, all we care about is the periodicity of the spikes.
+# mask all deltabic less than 0 to be 1 --> in our normalized case, 
 
+# log files directory, KEEP THOSE LOG FILES MATE !!!!
 
 # BIC COMPARISON, NOTCH HAS 3 EXTRA PARAMETERS IN ITS FIT
 # BIC = k ln(n)− 2 ln(L) where k = number of parameters, n is number of data points, L is maximum likelihood of model given data
@@ -308,20 +314,22 @@ def _run_notch(TIME, FLUX, dtr_dict, verbose=False):
 
     return flat_flux, trend_flux, notch
 
-tic_id = 146520535
-# 166527623 , the hip star isnt working --> wrong period everytime --> it isnt detecting the planet transit, but artificial transits
+tic_id = 166527623
+# 166527623 , the hip star isnt working --> wrong period everytime --> it isnt detecting the planet transit, but artificial transits --> /home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2023096110322-s0064-0000000166527623-0257-s/tess2023096110322-s0064-0000000166527623-0257-s_lc.fits
+# reason behind hip not working could very well be due to the binning process which removes the transit [makes it shallower, refer to the window20 issue]
+
 # created due to data downlinks --> big problem --> similar to what wotan did in many cases, maybe jumped over possible other transits
 # in a similar fashion/way --> i remember trying to find a way to remove these earlier, just to remove any dips near data downtime regions,
 # but i couldnt figure out a way to do this, maybe talk to luke about this. 
 
-# 441420236, AU Mic b worked with this pipeline
-# 460205581, TOI 837b, Luke's planet worked.
+# 441420236, AU Mic b worked with this pipeline --> /home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2020186164531-s0027-0000000441420236-0189-s/tess2020186164531-s0027-0000000441420236-0189-s_lc.fits
+# 460205581, TOI 837b, Luke's planet worked. --> /home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2025071122000-s0090-0000000460205581-0287-s/tess2025071122000-s0090-0000000460205581-0287-s_lc.fits
 
-# 146520535 , not working --> orbital period is wrong
+# 146520535 , not working --> orbital period is wrong --> /home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2020324010417-s0032-0000000146520535-0200-s/tess2020324010417-s0032-0000000146520535-0200-s_lc.fits
 
 # Major point to note, the flattened flux method is much better than the deltabic thing which sometimes just doesnt work --> returns nans
-path = "/home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2020324010417-s0032-0000000146520535-0200-s/tess2020324010417-s0032-0000000146520535-0200-s_lc.fits"
-pdfpath = f"/home/gurmeher/gurmeher/Notch_and_LOCoR/results/TIC_{tic_id}.pdf"
+path = "/home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2023096110322-s0064-0000000166527623-0257-s/tess2023096110322-s0064-0000000166527623-0257-s_lc.fits"
+pdfpath = f"/home/gurmeher/gurmeher/Notch_and_LOCoR/results/TIC_{tic_id}_normal.pdf"
 
 hdu_list = fits.open(path)
 hdr = hdu_list[0].header
@@ -374,7 +382,12 @@ axs[1].scatter(pdc_time_binned , flat_flux, s = 0.5)
 axs[0].plot(pdc_time_binned, trend_flux, color = 'red', linewidth = 1.5, zorder = 1)
 
 delbic = notch.deltabic * -1
-delbic = delbic/np.nanmedian(delbic)
+median_val = np.nanmedian(delbic)
+min_val = np.min(delbic)
+shift = delbic - min_val # this makes the minimum value 0
+scale_factor = median_val - min_val # the scale factor isnt range, but rather median - min
+delbic = shift/scale_factor 
+
 axs[2].scatter(pdc_time_binned, delbic, color = 'pink', s = 0.5)
 print(notch.deltabic)
 
@@ -419,8 +432,8 @@ axs[3].scatter(results1.folded_phase, results1.folded_y, marker = 'o', s = 0.25,
 axs[3].plot(results1.model_folded_phase, results1.model_folded_model, color = 'red', label = 'TLS MODEL for SAP Flux')
 axs[4].scatter(results2.folded_phase, results2.folded_y, marker = 'o', s = 0.25, color = 'black', label = f'PDCSAP phase-folded\nTLS Period = {period2:.4f} d\nSDE = {sde2:.2f}')
 axs[4].plot(results2.model_folded_phase, results2.model_folded_model, color = 'red', label = 'TLS MODEL for PDCSAP Flux')
-periods = results2.periods
-powers = results2.power
+periods = results1.periods
+powers = results1.power
 
 axs[5].plot(periods, powers, color='black')
 axs[5].set_xlabel("Trial Period (days)")
@@ -448,6 +461,9 @@ with open(txtpath, "w") as f:
 for ax in axs:
     ax.legend()
 print(prot)
+
+print(delbic)
 with PdfPages(pdfpath) as pdf:
     pdf.savefig(fig, bbox_inches = 'tight')
     plt.close(fig)
+
