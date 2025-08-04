@@ -130,6 +130,15 @@ OR THE NOTCH METHOD, JUST CREATE THE SUBDIRECTORY BEFORE YOU RUN THE CODE!'''
         print("Corresponding indices:", np.where(dt > gap_threshold)[0])
     return mask'''
 
+### 3rd August
+## w.r.t. the notch methodology, since we are running it on unbinned data, we know it takes a long time for the code to run
+## Now, since for notch we aren't really concerned with flux time series, to save time, if makeplots = True
+## lets just apply tls on the deltabic and show the mosaic plotter of that!
+## This skips the entire notch process again when makeplots is now true [before we ran it anyways when makepltos = false to generate pickle file]
+## a workaround to this would be, to save the trends that notch generates also in the pickle files.
+## we didnt think to do this earlier with wotan since the wotan detrending took mere seconds, and didnt take 8 minutes like notch does
+## talk to Luke about this tomorrow!
+
 def count_points_per_window(time, window_length): # to do the data downlink cleaning 
     half_window = window_length / 2
     counts = []
@@ -302,7 +311,16 @@ def _run_notch(TIME, FLUX, dtr_dict, verbose=False): # KEEP VERBOSE FALSE becaus
 
 '''FUNCTIONS *ONLY* FOR NOTCH IMPLEMENTATION END'''
 
+def phase_bin(phase, flux, bins=100):
+    phase = phase % 1  # wrap phase to [0, 1]
+    bin_edges = np.linspace(0, 1, bins + 1) # creates bin number of bins between 0 and 1, since it is folded between 0 and 1
+    bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1]) # calcualtes the center point of each bin 
+    digitized = np.digitize(phase, bin_edges) - 1 # to assign the right bin for each object in the array list 
 
+    binned_flux = [np.nanmedian(flux[digitized == i]) if np.any(digitized == i) else np.nan for i in range(bins)] # checks if bin is 
+    #empty, returns nan if true
+
+    return bin_centers, np.array(binned_flux)
 # 29th July unvetted_tic currently commented out due to the re-running of pipeline 
 '''def unvetted_tic(tic_id, detrend, sector_number, wdwstr):
     tic_id = str(tic_id)
@@ -418,11 +436,12 @@ def bin_lightcurve(time, flux, bin_minutes=30):
 
     return np.array(binned_time), np.array(binned_flux)
 
-def pipeline(detrender, sect_no, wdwle, make_plots = True):
+def pipeline(detrender, sect_no, wdwle, make_plots = False):
     "IMPORTED EVERYTHING OUTSIDE NOW THAT I'M CHUNKING EVERYTHING"
     sector_number = sect_no
     sector_str = str(sect_no)
-    sdethreshold = 10
+    sdethreshold_wotan = 10
+    sdethreshold_notch_bic = 19
     wdwstr = str(wdwle)
     detrend = detrender # defining the detrending method, this is not relevant rn, will get relevant when we have notch as alt.
     lcpaths = glob(f"/ar1/TESS/SPOC/s00{sector_number}/*.fits") # wherever your fits lightcurves are saved 
@@ -448,6 +467,8 @@ def pipeline(detrender, sect_no, wdwle, make_plots = True):
         data = hdu_list[1].data
         hdu_list.close()
         tic_id = hdr.get('TICID', 'unknown')
+        ra = hdr.get('RA') or hdr.get('RA_OBJ') or hdr.get('TARGRA') or 'Not found'
+        dec = hdr.get('DEC') or hdr.get('DEC_OBJ') or hdr.get('TARGDEC') or 'Not found'
 
         if str(tic_id).lstrip('0') not in valid_ticids:
             DEBUG and print(f"{tic_id} is not a high sde tic... skipping") 
@@ -455,7 +476,8 @@ def pipeline(detrender, sect_no, wdwle, make_plots = True):
         
         #multipage_pdf_path = f"/home/gurmeher/gurmeher/detrending/sde10lightcurves/edited/sector{sector_number}/TIC_{tic_id}.pdf" # comment this 
         if detrend.lower() == "wotan":
-            outpath = join(RESULTSDIR, detrend, 'window'+wdwstr, 'mainlc', 'sector'+sector_str, f"TIC_{tic_id}.pdf")
+            # outpath changed for mosaics, added mosaics and removed mainlc
+            outpath = join(RESULTSDIR, detrend, 'mosaic', 'window'+wdwstr, 'sector'+sector_str, f"TIC_{tic_id}.pdf")
             if os.path.exists(outpath):
                 DEBUG and print(f"Skipping TIC {tic_id} — already cached.")
                 continue # caching. If tic has already been produced, don't run algorithm again
@@ -559,7 +581,22 @@ def pipeline(detrender, sect_no, wdwle, make_plots = True):
             testing different windows, so the file structure in results will be different and something
             we will have to change particularly for notch
             
-            Also, in the NOTCH implementation, we will only be dealing with PDCSAP, no SAP!
+            Also, in the NOTCH implementation, we will only be dealing with PDCSAP
+
+            Additionally, the time series upon which TLS will be run, is not a flux time series, rather
+            a deltabic time series. This is a little difficult to intuitively grasp initially but it helps
+            detect transits which much greater efficiency. For this reason deltabic doesnt have a "detrender" pattern 
+            per se. We check if within a particular window, the notch + transit model is preferred, and we do a bic comparison 
+            in each window. This bic comparison [bayesian information criterion] is done with the following calculation
+
+            BIC = chi square + numebr of parameters * natlog(numberofpoints)
+            This chi square is calculated multiple times and in different iterative ways to remove any possible outliers. 
+
+            Also, We should most likely ideally use unbinned data since notch is very sensitive, losing signal to binning 
+            can actually be incredibly penalizing in this algorithm. This is from real experience testing with true positives
+            planet discoveries from TESS data. 
+
+
             '''
             if best_period_PDCSAP > 2:
                 dictionary = {"window_length" : 1}
@@ -567,20 +604,23 @@ def pipeline(detrender, sect_no, wdwle, make_plots = True):
                 dictionary = {"window_length" : 0.5}
 
             clipped_flux = slide_clip(
-            pdc_time_binned, pdc_flux_binned, window_length=dictionary['window_length'],
+            time, pdcsap_flux, window_length=dictionary['window_length'],
             low=100, high=2, method='mad', center='median') # extra clipping for NOTCH, from the wotan code
 
-            sel = np.isfinite(pdc_time_binned) & np.isfinite(clipped_flux)
-            pdc_time_binned = pdc_time_binned[sel]
-            pdc_flux_binned = 1.* clipped_flux[sel]
-            assert len(pdc_time_binned) == len(pdc_flux_binned)
+            sel = np.isfinite(time) & np.isfinite(clipped_flux)
+            time = time[sel]
+            pdcsap_flux = 1.* clipped_flux[sel]
+            assert len(time) == len(pdcsap_flux)
 
             '''downtimemask = create_downlink_mask(pdc_time_binned)
             pdc_time_binned = pdc_time_binned[downtimemask]
             pdc_flux_binned = pdc_flux_binned[downtimemask]'''
 
-            flatten_lc2, trend_lc2, notch = _run_notch(pdc_time_binned, pdc_flux_binned/np.nanmedian(pdc_flux_binned), dictionary)
+            flatten_lc2, trend_lc2, notch = _run_notch(time, pdcsap_flux/np.nanmedian(pdcsap_flux), dictionary)
 
+
+
+            ''' NORMALIZING DELTA BIC to make it a TLS runnable TIME SERIES '''
             delbic = notch.deltabic * -1
             median_val = np.nanmedian(delbic)
             min_val = np.min(delbic)
@@ -590,7 +630,9 @@ def pipeline(detrender, sect_no, wdwle, make_plots = True):
 
 
             flatten_lc1 = delbic # for naming consistency for plotting
-            trend_lc1 = trend_lc2  # since delbic doesnt have a trend, just make both of them delbic 
+            # commenting this out rn cuz technically deltabic doesnt have a trend. 
+            #trend_lc1 = trend_lc2  
+            # since delbic doesnt have a trend, just make both of them delbic  (?)
             # continue
         
 
@@ -600,8 +642,8 @@ def pipeline(detrender, sect_no, wdwle, make_plots = True):
             pdc_time_clean, flatten_lc2_clean = clean_arrays(time, flatten_lc2)
 
         elif detrend.lower() == "notch":
-            sap_time_clean, flatten_lc1_clean = clean_arrays(pdc_time_binned, flatten_lc1)
-            pdc_time_clean, flatten_lc2_clean = clean_arrays(pdc_time_binned, flatten_lc2)
+            sap_time_clean, flatten_lc1_clean = clean_arrays(time, flatten_lc1)
+            pdc_time_clean, flatten_lc2_clean = clean_arrays(time, flatten_lc2)
             # REMEMBER HERE --> SAP_TIME_CLEAN IS THE DELBIC 
 
 
@@ -627,7 +669,7 @@ def pipeline(detrender, sect_no, wdwle, make_plots = True):
         
             
         
-        model1 = transitleastsquares(sap_time_clean, flatten_lc1_clean) 
+        model1 = transitleastsquares(sap_time_clean, flatten_lc1_clean)  # This is for deltabic 
         '''*ATTENTION* !!!! 
         sap_time_clean will be *deltabic* if NOTCH is chosen.
         NOT CHANGING THIS FOR NAMING CONSISTENCY IN CODE '''
@@ -687,9 +729,14 @@ def pipeline(detrender, sect_no, wdwle, make_plots = True):
                         with open(filepath, "rb" ) as f:
                             obj = pickle.load(f)
                             sde = obj.get('SDE', None)
-                        if sde > sdethreshold and tic_id not in existing_tics:
-                            with open(highsdetic_path, "a") as f:
-                                f.write(f"{tic_id}\n")
+                        if detrend.lower() == "wotan":
+                            if sde > sdethreshold_wotan and tic_id not in existing_tics:
+                                with open(highsdetic_path, "a") as f:
+                                    f.write(f"{tic_id}\n")
+                        elif detrend.lower() == "notch":
+                            if sde > sdethreshold_notch_bic and tic_id not in existing_tics:
+                                with open(highsdetic_path, "a") as f:
+                                    f.write(f"{tic_id}\n")
 
             except ValueError as e:
                 DEBUG and print(f"TIC {tic_id}: TLS failed with error: {e}")
@@ -716,6 +763,7 @@ def pipeline(detrender, sect_no, wdwle, make_plots = True):
             elif detrend.lower() == "notch":
                 tls_period = results1.period
                 tls_t0 = results1.T0
+                # this is because deltabic time series is more accurate than the flux time series in notch
 
             # Compute all expected transit times within observed time span
             epochs = np.arange(-1000, 1000)
@@ -738,44 +786,46 @@ def pipeline(detrender, sect_no, wdwle, make_plots = True):
 
             # no need for a try and except here because only working tls algorithms will fall down this path since they are in high
             # sde tic ids
+            mosaic = (
+            """
+            AAAAAAAAAAAAAAAAA
+            AAAAAAAAAAAAAAAAA
+            AAAAAAAAAAAAAAAAA
+            BBBBBBBBBBBBBBBBB
+            BBBBBBBBBBBBBBBBB
+            BBBBBBBBBBBBBBBBB
+            CCCCCCCCCCCCCCCCC
+            CCCCCCCCCCCCCCCCC
+            CCCCCCCCCCCCCCCCC
+            DDDDDDDDDDDDDDDDD
+            DDDDDDDDDDDDDDDDD
+            DDDDDDDDDDDDDDDDD
+            EEEEFFFFGGGHHHIII
+            EEEEFFFFGGGHHHIII
+            """)
 
-            ''' PLOTTING RAW DATA FIRST '''
+            #CHANGING PLOTTING STYLE TO SUBPLOT MOSAICS!
 
-            fig3, axs3 = plt.subplots(nrows =3 , figsize = (6,10), sharex = True)
-            plt.subplots_adjust(hspace = 0.3)
-            axs3[0].scatter(time, sap_flux, c='k', s= 0.8, label = 'SAP')
-            axs3[1].scatter(time, pdcsap_flux, c = 'k', s= 0.8, label = 'PDCSAP')
-            axs3[2].scatter(time, bkgd, c = 'k', s = 0.8, label = 'BKGD')
-            axs3[0].set_title(f" RAW DATA FOR TIC {tic_id}")
-
+            subplotter, plaxes = plt.subplot_mosaic(mosaic, figsize=(19, 14 ))
+            plt.subplots_adjust(hspace=0.3)
 
             ''' PLOTTING BINNED DATA '''
 
-            fig, axs = plt.subplots(nrows=6, figsize=(12,18))
-            plt.subplots_adjust(hspace=0.3)
-            axs[0].scatter(sap_time_binned, sap_flux_binned, c='k', zorder = 2, s=0.8, label = 'SAP')
-            axs[0].set_ylabel("SAP", fontsize = 8 )
-            axs[0].set_title(f"TIC {tic_id} — TESS mag = {tessmag} at Temp = {tempeff} Binned to 30 minutes", fontsize=8)
-
-            axs[1].scatter(pdc_time_binned, pdc_flux_binned, c='k', zorder = 2, s=0.8, label = 'PDCSAP')
-            axs[1].set_ylabel("PDCSAP", fontsize = 8)
-
+            plaxes['A'].scatter(sap_time_binned, sap_flux_binned, c='k', zorder = 2, s=5, label = 'SAP')
+            plaxes['A'].set_title(f"DETRENDING TIC {tic_id}")
+            plaxes['A'].set_xticks([])
+            plaxes['B'].scatter(pdc_time_binned, pdc_flux_binned, zorder =2,  c='k', s=5, label = 'PDCSAP')
+            plaxes['B'].set_xticks([])
 
             ''' PLOTTING LOMBSCARGLE PERIODOGRAM '''
-            
-            axs[2].plot(frequency_SAP, power_SAP, label = 'SAP LS')
-            axs[2].set_ylabel("Power", fontsize = 8)
-            axs[2].set_xlabel('Frequency', fontsize = 8)
+            plaxes['G'].plot(frequency_SAP, power_SAP)
+            plaxes['G'].set_yticks([])
+            plaxes['H'].plot(frequency_PDCSAP, power_PDCSAP)
+            plaxes['H'].set_yticks([])
+            plaxes['G'].set_xscale('log')  # For PDCSAP
+            plaxes['H'].set_xscale('log')
 
-            axs[3].plot(frequency_PDCSAP, power_PDCSAP, label = 'PDC LS')
-            axs[3].set_ylabel("Power", fontsize = 8)
-            axs[3].set_xlabel('Frequency', fontsize = 8)
-
-            axs[2].set_xscale('log')  # For SAP
-            axs[3].set_xscale('log')  # For PDCSAP
-
-
-            # keeping the sap cutoff for the pdc_sap cutoff since they should be about the same when considering flares, wouldn't change much i believe
+            '''# keeping the sap cutoff for the pdc_sap cutoff since they should be about the same when considering flares, wouldn't change much i believe
             for i in range(len(axs)):
                 if i < 2 or i > 3:
                 # initially had put the q1, q3 and everything here, caused such problems
@@ -785,64 +835,72 @@ def pipeline(detrender, sect_no, wdwle, make_plots = True):
                     # I set the axis limit at 20 because it was catching another rotation period at about 0.02 days, which was a little crazy for the 
                     # that 0.02 thing I saw was the binning cadence signal which is okay to mask
                     # lightcurve
-                    continue
+                    continue'''
 
                 #ax.set_ylim([0, upper_bound])
-        
-            '''PLOTTING PHASE FOLDED TO ONE PERIOD '''
-
-            fig_phase, axs_phase = plt.subplots(2, figsize=(10, 8), sharex=True)
-            plt.subplots_adjust(hspace=0.3)
-            axs_phase[0].scatter(sap_phase, sap_flux_binned, s=0.5, c='black', label='SAP Phase Folded')
-            axs_phase[0].set_ylabel("Flux")
-            axs_phase[0].set_title(f"TIC {tic_id} — SAP Phase Folded at {best_period_SAP:.4f} d") # four decimal places rounded 
-            axs_phase[0].legend()
-
-            axs_phase[1].scatter(pdcsap_phase, pdc_flux_binned, s=0.5, c='black', label='PDCSAP Phase Folded')
-            axs_phase[1].set_xlabel("Phase")
-            axs_phase[1].set_ylabel("Flux")
-            axs_phase[1].set_title(f"TIC {tic_id} — PDCSAP Phase Folded at {best_period_PDCSAP:.4f} d") # 4 decimal places round
-            axs_phase[1].legend()
-
-            plt.close(fig_phase)
-
-
+    
             ''' PLOTTING WOTAN/NOTCH FLATTENING CURVE '''
             if detrend.lower() == "wotan":
-                axs[0].plot(time, trend_lc1, linewidth = 1.5, zorder = 1, color = 'red')
-                axs[1].plot(time, trend_lc2, linewidth = 1.5, zorder = 1, color = 'red')
+                plaxes['A'].plot(time, trend_lc1, linewidth = 2, zorder = 1, color = 'red')
+                plaxes['B'].plot(time, trend_lc2, linewidth = 2, zorder = 1, color = 'red')
 
-                axs[4].scatter(time, flatten_lc1, s=1, color='black', label = 'Flattened SAP')
-                axs[5].scatter(time, flatten_lc2, s = 1, color = 'black', label = 'Flattened PDCSAP')
+                time_flatten1_binned, flatten_lc1_binned = bin_lightcurve(time, flatten_lc1)
+                time_flatten2_binned, flatten_lc2_binned = bin_lightcurve(time, flatten_lc2)
+                # for visualization purposes, flattened lightcurves have also been binned
+                plaxes['C'].scatter(time_flatten1_binned, flatten_lc1_binned, s=1.5, color='black')
+                plaxes['C'].set_xticks([])
+                plaxes['D'].scatter(time_flatten2_binned, flatten_lc2_binned, s = 1.5, color = 'black')
+
+                ylimitsap = plaxes['C'].get_ylim()
+                sapstd = np.nanstd(flatten_lc1)
+                yupsap = 1 + 2.5*sapstd if np.isfinite(sapstd) else 1.02
+                ylowsap = ylimitsap[0] 
+                if np.isfinite(ylowsap) and np.isfinite(yupsap):
+                    plaxes['C'].set_ylim(ylowsap, yupsap)
+                print(f"STD = {sapstd}")
+
+                ylimitpdc = plaxes['D'].get_ylim()
+                pdcstd = np.nanstd(flatten_lc2)
+                yuppdc = 1 + 2.5*pdcstd if np.isfinite(pdcstd) else 1.02
+                ylowpdc = ylimitpdc[0]
+                print(f" STD pdc = {pdcstd}")
+                print(ylowpdc)
+                print(f"upper {ylimitpdc[1]}")
+                print(f"{tic_id} upper = {yuppdc}")
+                if np.isfinite(ylowsap) and np.isfinite(yupsap):
+                    plaxes['D'].set_ylim(ylowpdc, yuppdc)
+                print(f"STD = {pdcstd}")
             
             elif detrend.lower() == "notch":
-                axs[0].plot(pdc_time_binned, trend_lc1, linewidth = 1.5, zorder = 1, color = 'red')
-                axs[1].plot(pdc_time_binned, trend_lc2, linewidth = 1.5, zorder = 1, color = 'red')
+                plaxes['B'].plot(time, trend_lc2, linewidth = 1.5, zorder = 1, color = 'red')
 
-                axs[4].scatter(pdc_time_binned, flatten_lc1, s=1, color='black', label = 'Flattened SAP')
-                axs[5].scatter(pdc_time_binned, flatten_lc2, s = 1, color = 'black', label = 'Flattened PDCSAP')
+                plaxes['C'].scatter(time, flatten_lc1, s=1.5, color='black', label = 'DeltaBic Time Series')
+                plaxes['D'].scatter(time, flatten_lc2, s = 1.5, color = 'black', label = 'Flattened PDCSAP')
 
-            for ax in axs:
-                ax.legend()
+            '''for ax in axs:
+                ax.legend()''' # redundant right now
 
             # Plot blue triangles at each expected transit time
             for t in visible_transits:
-                axs[5].scatter(t, y_marker, marker='^', color='blue', s=20, zorder=3, label='Transit time' if t==visible_transits[0] else "")
-                axs[1].scatter(t, y_marker, marker = '^', color = 'blue', s=20, zorder=3, label='Transit time' if t == visible_transits[0] else "")
+                if detrend.lower() == "wotan":
+                    plaxes['D'].scatter(t, y_marker, marker='^', color='blue', s=20, zorder=3, label='Transit time' if t==visible_transits[0] else "")
+                elif detrend.lower() == "notch":
+                    plaxes['C'].scatter(t, y_marker, marker='^', color='blue', s=20, zorder=3, label='Transit time' if t==visible_transits[0] else "")
+                plaxes['B'].scatter(t, y_marker, marker = '^', color = 'blue', s=20, zorder=3, label='Transit time' if t == visible_transits[0] else "")
 
 
             if not ticker:
-                axs[1].set_title(f"Prot is {harmonic:.2f}x of Porb ", color = "red")
+                plaxes['B'].set_title(f"Prot is {harmonic:.2f}x of Porb ", color = "red")
             else:
-                axs[1].set_title(f"Prot is not a harmonic of Porb, Potential Planetary Signal")
+                plaxes['B'].set_title(f"Prot is not a harmonic of Porb within 1%, Potential Planetary Signal")
 
             #fig.savefig(savpath, bbox_inches='tight', format = "pdf")
-            plt.close(fig)
+            #plt.close(fig)
 
             ''' PLOTTING TLS '''
 
-            figure2, axs2 = plt.subplots(nrows = 2, figsize = (10,12))
-            plt.subplots_adjust(hspace=0.3)
+            #figure2, axs2 = plt.subplots(nrows = 2, figsize = (10,12))
+            #plt.subplots_adjust(hspace=0.3)
 
             # whats the TLS found orbiital period 
                 
@@ -855,53 +913,59 @@ def pipeline(detrender, sect_no, wdwle, make_plots = True):
             if detrend.lower() == "wotan":
                 periods = results2.periods
                 power = results2.power
-            else:
+            elif detrend.lower() == "notch":
                 periods = results1.periods
                 power = results1.power 
 
-            f = plt.figure(figsize=(10, 5))
-            plt.plot(periods, power, color='black')
-            plt.xlabel("Trial Period (days)")
-            plt.ylabel("TLS Power (SDE)")
-            plt.title("TLS Detection Spectrum for Detrender: " + detrend)
-            plt.grid(True)
-            plt.close()
                 
-            axs2[0].scatter(results1.folded_phase, results1.folded_y, marker = 'o', s = 0.25, color = 'black', label = f'DELTABIC phase-folded\nTLS Period = {period1:.4f} d\nSDE = {sde1:.2f}')
-            axs2[0].plot(results1.model_folded_phase, results1.model_folded_model, color = 'red', label = 'TLS MODEL for DELTABIC')
-            axs2[0].set_title(f" TLS result algorithm on TIC {tic_id}")
-            axs2[1].scatter(results2.folded_phase, results2.folded_y, marker = 'o', s = 0.25, color = 'black', label = f'Flattened Flux phase-folded\nTLS Period = {period2:.4f} d\nSDE = {sde2:.2f}')
-            axs2[1].plot(results2.model_folded_phase, results2.model_folded_model, color = 'red', label = 'TLS MODEL for Flattened Flux')
-
+            plaxes['E'].scatter(results1.folded_phase, results1.folded_y, marker = 'o', zorder=1, s = 0.25, color = 'black')
+            plaxes['E'].plot(results1.model_folded_phase, results1.model_folded_model, zorder=3, linewidth = 1, color = 'red')
+            plaxes['F'].scatter(results2.folded_phase, results2.folded_y, marker = 'o', zorder =1, s = 0.25, color = 'black')
+            plaxes['F'].plot(results2.model_folded_phase, results2.model_folded_model, zorder =3, linewidth = 1, color = 'red')
+            if np.isfinite(ylowsap) and np.isfinite(yupsap):
+                plaxes['E'].set_ylim(ylowsap, yupsap)
+            else:
+                print(f"Ylim a nan for TIC {tic_id}")
+            if np.isfinite(ylowpdc) and np.isfinite(yuppdc):
+                plaxes['F'].set_ylim(ylowpdc, yuppdc)
+            else:
+                print(f"Ylim a nan for TIC {tic_id}")
             #savpath2 = f"/home/gurmeher/gurmeher/detrending/TLS_TIC_{tic_id}.pdf"
-            for ax in axs2:
-                ax.legend()
-
+            #for ax in axs2:
+            #   ax.legend()
+            # PDCSAP phase-binned
+            sap_bin_phase, sap_bin_flux = phase_bin(results1.folded_phase, results1.folded_y, bins = 100)
+            plaxes['E'].scatter(sap_bin_phase, sap_bin_flux, s = 40, color = 'dodgerblue', edgecolors = 'black', linewidths = 0.5, zorder = 2)
+            #pdc_bin_flux = phase_bin_magseries(results2.folded_phase, results2.folded_y)
+            pdc_bin_phase, pdc_bin_flux = phase_bin(results2.folded_phase, results2.folded_y, bins=100)
+            plaxes['F'].scatter(
+            pdc_bin_phase, pdc_bin_flux,
+            s=40, color='dodgerblue', edgecolors='black', linewidths=0.5, zorder=2)
             #figure2.savefig(savpath2, bbox_inches ='tight', format = 'pdf')
-            plt.close(figure2)
+            #plt.close(figure2)
+            mult = best_period_PDCSAP/period2
+            try:
+                plaxes['I'].axis('off')
+                if isinstance(ra, float) and isinstance(dec, float):
+                    plaxes['I'].text(1.0,0.1, f"T-mag = {tessmag:.1f} \n Temp = {tempeff:.1f}K \n RA: {ra:.1f}º \n DEC: {dec:.1f}º\n Prot = {best_period_PDCSAP:.3f}d \n Porb = {period2:.3f}d \n Prot/Porb = {mult:.3f} \n PDCSAP SDE = {sde2:.2f} \n SAP SDE ={sde1:.2f}", ha='right', va='bottom', transform=plaxes['I'].transAxes,
+                fontsize=10)
+                else:
+                    plaxes['I'].text(1.0,0.1, f"T-mag = {tessmag:.1f} \n Temp = {tempeff:.1f}K \n Prot = {best_period_PDCSAP:.3f}d \n Porb = {period2:.3f}d \n Prot/Porb = {mult:.3f} \n PDCSAP SDE = {sde2:.2f} \n SAP SDE ={sde1:.2f}", ha='right', va='bottom', transform=plaxes['I'].transAxes,
+                fontsize=10)
+            except TypeError:
+                print(f"Annotation has a problem in one of the values, check in detail manually for TIC {tic_id}")
+            
 
-            with PdfPages(outpath) as pdf:
+            subplotter.tight_layout()
+            subplotter.savefig(outpath, bbox_inches='tight', format='pdf')
+            plt.close(subplotter)
+            #with PdfPages(outpath) as pdf:
 
                 # Save first figure as page 1
-                pdf.savefig(fig, bbox_inches='tight')
-                plt.close(fig)
+             #   pdf.savefig(subplotter, bbox_inches='tight')
+              #  plt.close(subplotter)
             
-                # Saving figure as page 2
-                pdf.savefig(fig_phase, bbox_inches = 'tight')
-                plt.close(fig_phase)
-
-                # Save figure as page 3
-                pdf.savefig(fig3, bbox_inches = 'tight')
-                plt.close(fig3)
-
-                # Save figure as page 4
-                pdf.savefig(figure2, bbox_inches='tight')
-                plt.close(figure2)
-
-                pdf.savefig(f, bbox_inches='tight')
-                plt.close(f)
-    
-            
+               
 
 
 
