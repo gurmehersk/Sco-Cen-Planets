@@ -242,9 +242,16 @@ def _run_notch(TIME, FLUX, dtr_dict, verbose=False):
     use_arclength = False
     # Internally, keep as "False" to use wdat.fcor as the flux.
     use_raw = False
+
+
     # BIC difference between transit and no-transit model required to
     # select the transit model
-    min_deltabic = -1.0
+
+
+    # NOTICE/WARNING/ATTENTION, DELTABIC > 0 MEANS NOTCH IS FAVORED!!!
+    # Noticed this while going through the sliding window function in more detail.
+    min_deltabic = -1
+
     # By default (resolvabletrans == False), a grid of transit durations is
     # searched. [0.75, 1.0, 2.0, 4.0] hours.  If this is set to be True,
     # the 45 minute one is dropped.
@@ -277,10 +284,10 @@ def _run_notch(TIME, FLUX, dtr_dict, verbose=False):
             show_progress=show_progress
         )
     )
-    print("depth[1] (deltabic) summary:")
-    print("min:", np.nanmin(depth[1]))
-    print("max:", np.nanmax(depth[1]))
-    print("unique values:", np.unique(depth[1]))
+    verbose and print("depth[1] (deltabic) summary:")
+    verbose and print("min:", np.nanmin(depth[1]))
+    verbose and print("max:", np.nanmax(depth[1]))
+    verbose and print("unique values:", np.unique(depth[1]))
     if verbose:
         LOGINFO('Completed notch run.')
 
@@ -314,7 +321,7 @@ def _run_notch(TIME, FLUX, dtr_dict, verbose=False):
 
     return flat_flux, trend_flux, notch
 
-tic_id = 166527623
+tic_id = 441420236
 # 166527623 , the hip star isnt working --> wrong period everytime --> it isnt detecting the planet transit, but artificial transits --> /home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2023096110322-s0064-0000000166527623-0257-s/tess2023096110322-s0064-0000000166527623-0257-s_lc.fits
 # reason behind hip not working could very well be due to the binning process which removes the transit [makes it shallower, refer to the window20 issue]
 
@@ -328,8 +335,8 @@ tic_id = 166527623
 # 146520535 , not working --> orbital period is wrong --> /home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2020324010417-s0032-0000000146520535-0200-s/tess2020324010417-s0032-0000000146520535-0200-s_lc.fits
 
 # Major point to note, the flattened flux method is much better than the deltabic thing which sometimes just doesnt work --> returns nans
-path = "/home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2023096110322-s0064-0000000166527623-0257-s/tess2023096110322-s0064-0000000166527623-0257-s_lc.fits"
-pdfpath = f"/home/gurmeher/gurmeher/Notch_and_LOCoR/results/TIC_{tic_id}_normal.pdf"
+path = "/home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2020186164531-s0027-0000000441420236-0189-s/tess2020186164531-s0027-0000000441420236-0189-s_lc.fits"
+pdfpath = f"/home/gurmeher/gurmeher/Notch_and_LOCoR/results/TIC_{tic_id}_normal_neg1check.pdf"
 
 hdu_list = fits.open(path)
 hdr = hdu_list[0].header
@@ -343,7 +350,14 @@ bkgd = data['SAP_BKG'] # TODO : PLOT ME!
 mask = np.isfinite(time) & np.isfinite(pdcsap_flux)
 time_clean = time[mask]
 flux_clean = pdcsap_flux[mask] / np.nanmedian(pdcsap_flux[mask])
-pdc_time_binned, pdc_flux_binned = bin_lightcurve(time_clean, flux_clean)
+
+
+pdc_time_binned, pdc_flux_binned = time_clean, flux_clean
+# TRYING UNBINNED, UNCOMMENT BELOW TO USE BINNED ^ IT MENTIONS BINNED BUT ITS ACTUALLY UNBINNED
+#pdc_time_binned, pdc_flux_binned = bin_lightcurve(time_clean, flux_clean)
+
+
+
 #pdc_time_binned, pdc_flux_binned = bin_lightcurve(time, pdcsap_flux/np.nanmedian(pdcsap_flux))
 #pdc_time_binned, pdc_flux_binned = bin_lightcurve(time, pdcsap_flux)
 
@@ -389,12 +403,12 @@ scale_factor = median_val - min_val # the scale factor isnt range, but rather me
 delbic = shift/scale_factor 
 
 axs[2].scatter(pdc_time_binned, delbic, color = 'pink', s = 0.5)
-print(notch.deltabic)
+print(f"DELTABIC VALUES BEFORE ANY PROCESSING: {notch.deltabic}")
 
-print(f"pdc_time_binned: {pdc_time_binned}")
-print(f"delbic: {delbic}")
-print(f"len(pdc_time_binned): {len(pdc_time_binned)}")
-print(f"Any NaNs in time? {np.any(np.isnan(pdc_time_binned))}")
+#print(f"pdc_time_binned: {pdc_time_binned}")
+#print(f"delbic: {delbic}")
+#print(f"len(pdc_time_binned): {len(pdc_time_binned)}")
+#print(f"Any NaNs in time? {np.any(np.isnan(pdc_time_binned))}")
 
 
 
@@ -466,4 +480,3 @@ print(delbic)
 with PdfPages(pdfpath) as pdf:
     pdf.savefig(fig, bbox_inches = 'tight')
     plt.close(fig)
-
