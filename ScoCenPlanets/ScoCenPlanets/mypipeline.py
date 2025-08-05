@@ -42,6 +42,18 @@ OR THE NOTCH METHOD, JUST CREATE THE SUBDIRECTORY BEFORE YOU RUN THE CODE!'''
 # We have the pickle files and the highsdetic already so thats good, half the work is done.
 # Create a new sort of subdirectory/directory for v0, v1 (the one ill make rn)
 # version 1 should have all the lightcurves for the windows and sectors and then a subdirectory called "to vet" which has *NO REPEATS*
+
+# 4th AUGUST 
+### SO! Notch does NOT work with rapid rotators, so add that condition even for NOTCH!!! --> dont reserve to wotan --> for future sectors
+### 4th August 10.53pm ^^^^ Working on the rapid rotators issue, adding a rapidrotator.txt in every sector and removing the if block
+### Fix this tic ids string issue. For some reason the tic ids arent being saved properly and are being repeated/overwritten. This is bad
+### 4th august 10.53 pm ^^^ I think I fixed this above issue
+
+# 5th AUGUST
+#### HAVE REALIZED A MISTAKE WHICH IS VERY VERY VERY VERY CRUCIAL. With notch, please make sure the make_plots is in the correct setting
+#### rerunning under false erases notch pkl file 
+
+
 '''FUNCTIONS *ONLY* FOR NOTCH IMPLEMENTATION BEGINNING'''
 '''def create_downlink_mask(
     time: np.ndarray,
@@ -437,7 +449,8 @@ def bin_lightcurve(time, flux, bin_minutes=30):
 
     return np.array(binned_time), np.array(binned_flux)
 
-def pipeline(detrender, sect_no, wdwle, make_plots = False):
+def pipeline(detrender, sect_no, wdwle, make_plots = True): # PLEASE CHECK make_plots, IF YOU RUN IT AGAIN WHEN FALSE, NOTCH DATAFRAME
+    # GETS ERASED!!!!!!!! ##### BE EXTRA CERTAIN THAT THE FILE HAS SAVED WHEN YOU MAKE THAT CHANGE TO TRUE !!!!
     "IMPORTED EVERYTHING OUTSIDE NOW THAT I'M CHUNKING EVERYTHING"
     sector_number = sect_no
     sector_str = str(sect_no)
@@ -455,7 +468,8 @@ def pipeline(detrender, sect_no, wdwle, make_plots = False):
     
     elif detrend.lower() == "notch": # create this subdirectory noon, 28th July instruction --> DONE 
         failed_tics_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/"+ detrend + f"/mainlc/sector{sector_number}/failed_tics.txt"
-    
+        rapid_rotators_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/notch/mainlc/sector{sector_number}/rapidrotators.txt"
+
     # creating path to the csv file which holds important information to avoid rerunning notch
     flux_pkls_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/notch/flux_pkls/"
     # This will store all the data before it is turned into a pkl file 
@@ -465,6 +479,14 @@ def pipeline(detrender, sect_no, wdwle, make_plots = False):
     if make_plots:
         pkl_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/notch/flux_pkls/{sector_number}_all_flux.pkl"
         df = pd.read_pickle(pkl_path)
+        # Check the path to confirm it's what you think it is
+        print(f"Attempting to read from: {pkl_path}")
+
+        # Check the size of the DataFrame
+        print(f"DataFrame loaded with {len(df)} rows.")
+
+        # Check the columns of the loaded DataFrame
+        print(f"DataFrame columns immediately after load: {df.columns}")
 
     # creating validticids
     valid_ticids = get_this_sectors_ticids(make_plots, sector_number, detrend, wdwstr) # now this list will either have all ticids (if makeplots is false)
@@ -493,7 +515,7 @@ def pipeline(detrender, sect_no, wdwle, make_plots = False):
                 DEBUG and print(f"Skipping TIC {tic_id} — already cached.")
                 continue # caching. If tic has already been produced, don't run algorithm again
         elif detrend.lower() == "notch":
-            outpath = f"/home/gurmeher/gurmeher/notch/mainlc/sector{sector_number}/TIC_{tic_id}.pdf"
+            outpath = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/notch/mainlc/sector{sector_number}/TIC_{tic_id}.pdf"
             if os.path.exists(outpath):
                 DEBUG and print(f"Skipping TIC {tic_id} - already cached")
                 continue
@@ -555,8 +577,8 @@ def pipeline(detrender, sect_no, wdwle, make_plots = False):
         DEBUG and print(f'Best frequency: {best_frequency_PDCSAP}')
 
 
-        '''Neglecting rapid rotators for now *ONLY* FOR WOTAN ''' 
-        if detrend.lower() == "wotan":
+        '''Neglecting rapid rotators now FOR WOTAN *AND* NOTCH ''' 
+        if detrend.lower() == "wotan" or detrend.lower() == "notch":
             if best_period_PDCSAP < 1:
                 DEBUG and print("Rapid rotating, skipping for now....")
                 exist_rotator = set()
@@ -567,6 +589,8 @@ def pipeline(detrender, sect_no, wdwle, make_plots = False):
                             with open(rapid_rotators_path, "a") as f:
                                 f.write(f"{tic_id}\n")
                 continue
+        else:
+            continue
 
         '''PHASE FOLDING TO ONE TIME PERIOD '''
         sap_phase, pdcsap_phase = phase_folder(sap_time_binned, best_period_SAP, pdc_time_binned, best_period_PDCSAP)
@@ -743,17 +767,17 @@ def pipeline(detrender, sect_no, wdwle, make_plots = False):
                 for file in os.listdir(path): # traversing through all files inside the path
                     if file.endswith(".pkl"): # if the file is a pickle file 
                         filename_no_ext = os.path.splitext(file)[0]  # This is now a string like "TIC_123456789"
-                        tic_id = filename_no_ext.split("_")[1]       # 2 step process to extract the TIC ID before unpacking it and adding it to a txt file
+                        pkl_tic_id = filename_no_ext.split("_")[1]       # 2 step process to extract the TIC ID before unpacking it and adding it to a txt file
                         filepath = os.path.join(path, file)
                         with open(filepath, "rb" ) as f:
                             obj = pickle.load(f)
                             sde = obj.get('SDE', None)
                         if detrend.lower() == "wotan":
-                            if sde > sdethreshold_wotan and tic_id not in existing_tics:
+                            if sde > sdethreshold_wotan and pkl_tic_id not in existing_tics:
                                 with open(highsdetic_path, "a") as f:
                                     f.write(f"{tic_id}\n")
                         elif detrend.lower() == "notch":
-                            if sde > sdethreshold_notch_bic and tic_id not in existing_tics:
+                            if sde > sdethreshold_notch_bic and pkl_tic_id not in existing_tics:
                                 with open(highsdetic_path, "a") as f:
                                     f.write(f"{tic_id}\n")
                 # caching the important data points in a pkl file so I do not need to detrend with Notch when make_plots == True
@@ -788,6 +812,13 @@ def pipeline(detrender, sect_no, wdwle, make_plots = False):
                 results2 = model2.power(period_min = min_period, period_max = max_period)
 
             elif detrend.lower() == "notch":
+                ticstr = str(tic_id)
+                # The failing line is below this.
+                print(f"Checking DataFrame state just before failure...")
+                print(f"DataFrame has {len(df)} rows.")
+                print(f"DataFrame columns: {df.columns}")
+                if 'tic_id' not in df.columns:
+                    print("WARNING: 'tic_id' column is missing!")
                 if tic_id in df["tic_id"].values: # the .values is required for changing it from pandas to a numpy array so that we can use the "in" function
                     r = df[df["tic_id"] == tic_id].iloc[0] # without the iloc, we would get a dataframe of that tic_id, we want to extract the row
                     time = r["time"]
@@ -803,6 +834,11 @@ def pipeline(detrender, sect_no, wdwle, make_plots = False):
                     max_period = (time.max() - time.min()) / 2  # maximum orbtial period is half baseline
                     results1 = model1.power(period_min = min_period, period_max = max_period)
                     results2 = model2.power(period_min = min_period, period_max = max_period)
+                else:
+                    print(f"{tic_id} is not in the dataframe, so we are SKIPPING TIC ....")
+                    print(type(ticstr))  # is it int or str?
+                    print(df["tic_id"].apply(type).unique())  # types in the column
+                    continue
 
 
             # Predict transit times using TLS results
@@ -819,7 +855,10 @@ def pipeline(detrender, sect_no, wdwle, make_plots = False):
             epochs = np.arange(-1000, 1000)
             transit_times = tls_t0 + (tls_period * epochs)
             # Compute a y-position slightly below the light curve's minimum flux
-            y_marker = np.nanmin(flatten_lc2) - 0.005  # or adjust the offset
+            if detrend.lower() == "wotan":
+                y_marker = np.nanmin(flatten_lc2) - 0.005  # or adjust the offset
+            else:
+                y_marker = np.nanmin(flatten_flux) - 0.005 
 
             # Only keep transits that fall within your light curve time span
             in_transit = (transit_times > pdc_time_binned.min()) & (transit_times < pdc_time_binned.max())
@@ -939,8 +978,8 @@ def pipeline(detrender, sect_no, wdwle, make_plots = False):
                 ylimitFLAT = plaxes['D'].get_ylim()
                 pdcstd = np.nanstd(flatten_flux)
                 yuppdc = 1 + 2.5*pdcstd if np.isfinite(pdcstd) else 1.02
-                ylowpdc = ylimitpdc[0]
-                if np.isfinite(ylowsap) and np.isfinite(yupsap):
+                ylowpdc = ylimitFLAT[0]
+                if np.isfinite(ylowpdc) and np.isfinite(yuppdc):
                     plaxes['D'].set_ylim(ylowpdc, yuppdc)
 
             '''for ax in axs:
@@ -1017,7 +1056,7 @@ def pipeline(detrender, sect_no, wdwle, make_plots = False):
                     plaxes['I'].text(1.0,0.1, f"T-mag = {tessmag:.1f} \n Temp = {tempeff:.1f}K \n RA: {ra:.1f}º \n DEC: {dec:.1f}º\n Prot = {best_period_PDCSAP:.3f}d \n Porb = {period2:.3f}d \n Prot/Porb = {mult:.3f} \n PDCSAP SDE = {sde2:.2f} \n SAP SDE ={sde1:.2f}", ha='right', va='bottom', transform=plaxes['I'].transAxes,
                 fontsize=10)
                 else:
-                    plaxes['I'].text(1.0,0.1, f"T-mag = {tessmag:.1f} \n Temp = {tempeff:.1f}K \n Prot = {best_period_PDCSAP:.3f}d \n Porb = {period2:.3f}d \n Prot/Porb = {mult:.3f} \n PDCSAP SDE = {sde2:.2f} \n SAP SDE ={sde1:.2f}", ha='right', va='bottom', transform=plaxes['I'].transAxes,
+                    plaxes['I'].text(1.0,0.1, f"T-mag = {tessmag:.1f} \n Temp = {tempeff:.1f}K \n Prot = {best_period_PDCSAP:.3f}d \n Porb = {period2:.3f}d \n Prot/Porb = {mult:.3f} \n PDCSAP SDE = {sde2:.2f} \n SAP/DELBIC SDE ={sde1:.2f}", ha='right', va='bottom', transform=plaxes['I'].transAxes,
                 fontsize=10)
             except TypeError:
                 print(f"Annotation has a problem in one of the values, check in detail manually for TIC {tic_id}")
@@ -1031,13 +1070,15 @@ def pipeline(detrender, sect_no, wdwle, make_plots = False):
                 # Save first figure as page 1
              #   pdf.savefig(subplotter, bbox_inches='tight')
               #  plt.close(subplotter)
-    if not_makeplots:
+    if not make_plots:
         df_all = pd.DataFrame(flux_data)
         os.makedirs(flux_pkls_path, exist_ok = True) # create the directory. If it exists, dont need to raise error, just move on
         fin_pkl_path = os.path.join(flux_pkls_path, f"{sector_number}_all_flux.pkl")
-
-        df_all.to_pickle(fin_pkl_path)
-        print(f"Saved to {fin_pkl_path}")
+        if df_all.empty and os.path.exists(fin_pkl_path): # MAKES SURE A PREVIOUS DATA FRAME ISNT REWRITTEN UNLESS ABSOLUTELY NECESSARY
+            pass
+        else:
+            df_all.to_pickle(fin_pkl_path)
+            print(f"Saved to {fin_pkl_path}")
 
                
 
