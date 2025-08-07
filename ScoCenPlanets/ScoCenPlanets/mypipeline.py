@@ -285,10 +285,10 @@ def _run_notch(TIME, FLUX, dtr_dict, verbose=False): # KEEP VERBOSE FALSE becaus
             show_progress=show_progress
         )
     )
-    print("depth[1] (deltabic) summary:")
-    print("min:", np.nanmin(depth[1]))
-    print("max:", np.nanmax(depth[1]))
-    print("unique values:", np.unique(depth[1]))
+    verbose and print("depth[1] (deltabic) summary:")
+    verbose and print("min:", np.nanmin(depth[1]))
+    verbose and print("max:", np.nanmax(depth[1]))
+    verbose and print("unique values:", np.unique(depth[1]))
     if verbose:
         LOGINFO('Completed notch run.')
 
@@ -449,7 +449,7 @@ def bin_lightcurve(time, flux, bin_minutes=30):
 
     return np.array(binned_time), np.array(binned_flux)
 
-def pipeline(detrender, sect_no, wdwle, make_plots = True): # PLEASE CHECK make_plots, IF YOU RUN IT AGAIN WHEN FALSE, NOTCH DATAFRAME
+def pipeline(detrender, sect_no, wdwle, make_plots = False): # PLEASE CHECK make_plots, IF YOU RUN IT AGAIN WHEN FALSE, NOTCH DATAFRAME
     # GETS ERASED!!!!!!!! ##### BE EXTRA CERTAIN THAT THE FILE HAS SAVED WHEN YOU MAKE THAT CHANGE TO TRUE !!!!
     "IMPORTED EVERYTHING OUTSIDE NOW THAT I'M CHUNKING EVERYTHING"
     sector_number = sect_no
@@ -525,7 +525,10 @@ def pipeline(detrender, sect_no, wdwle, make_plots = True): # PLEASE CHECK make_
             pickle_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/"+ detrend + "/window"+ wdwstr + f"/pickle/sector{sector_number}/TIC_{tic_id}.pkl" # change this to a new path 
         elif detrend.lower() == "notch":
             pickle_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/notch/pickle/sector{sector_number}/TIC_{tic_id}.pkl"
-
+            #### extra pickle path for individual flux arrays etc to save time and cache
+            #### Mainly need this for sector91 and sector90 if it fails.
+            flux_pickle_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/notch/pickle_fluxes/sector{sector_number}/TIC_{tic_id}.pkl"
+        
         if not make_plots:
             if os.path.exists(pickle_path) or str(tic_id) in failed_tics_path: # trying to cache the failed ones as well
                 DEBUG and print(f"Skipping TIC {tic_id} — already cached.")
@@ -710,17 +713,23 @@ def pipeline(detrender, sect_no, wdwle, make_plots = True): # PLEASE CHECK make_
                 # not skipping them now though, i will let them go into the exception error and be saved in the failedtics.txt list
             
             
-                
-            
-            model1 = transitleastsquares(sap_time_clean, flatten_lc1_clean)  # This is for deltabic 
-            '''*ATTENTION* !!!! 
-            sap_time_clean will be *deltabic* if NOTCH is chosen.
-            NOT CHANGING THIS FOR NAMING CONSISTENCY IN CODE '''
-            model2 = transitleastsquares(pdc_time_clean, flatten_lc2_clean)
+            ### 7TH AUGUST, ADDED THIS FAILSAFE IN CASE DELTABIC CONDITION DOESNT WORK FOR SOME REASON
+            ### THIS CAUSED A RIFT IN MY SECTOR91 CODE, SO I HAD TO RERUN IT.
+            try:
+                model1 = transitleastsquares(sap_time_clean, flatten_lc1_clean)  # This is for deltabic 
+                '''*ATTENTION* !!!! 
+                sap_time_clean will be *deltabic* if NOTCH is chosen.
+                NOT CHANGING THIS FOR NAMING CONSISTENCY IN CODE '''
+                model2 = transitleastsquares(pdc_time_clean, flatten_lc2_clean)
 
-            min_period = 0.5  # days, or a bit more than your cadence
-            max_period = (pdc_time_clean.max() - pdc_time_clean.min()) / 2  # maximum orbtial period is half baseline
-            DEBUG and print(max_period)
+                min_period = 0.5  # days, or a bit more than your cadence
+                max_period = (pdc_time_clean.max() - pdc_time_clean.min()) / 2  # maximum orbtial period is half baseline
+                DEBUG and print(max_period)
+            except:
+                DEBUG and print(f"TIC {tic_id}: TLS model creation failed with error")
+                with open(failed_tics_path, "a") as failfile:
+                    failfile.write(f"{tic_id}\n")
+                continue
 
         # TO ADD PLOTS ACCORDING TO THE DETRENDER CHOSEN!
 
@@ -728,6 +737,7 @@ def pipeline(detrender, sect_no, wdwle, make_plots = True): # PLEASE CHECK make_
             # getting an error on the results module here --> NOT ANYMORE I THINK (28TH JULY) 
         if not make_plots:
             try:
+                
                 results1 = model1.power(period_min = min_period, period_max = max_period) # now inputting minimum and maximum period to try and fix valueError of empty TLS
                 results2 = model2.power(period_min = min_period, period_max = max_period)
                 ''' CACHING TO IGNORE ANY ITERATIONS THAT HAVE ALREADY OCCURED ''' 
@@ -787,6 +797,9 @@ def pipeline(detrender, sect_no, wdwle, make_plots = True): # PLEASE CHECK make_
                 
                 # save this row in flux_data 
                 flux_data.append(row)
+                if detrend.lower() == "notch":
+                    with open(flux_pickle_path, 'wb') as f:
+                        pickle.dump(row, f)
 
             except ValueError as e:
                 DEBUG and print(f"TIC {tic_id}: TLS failed with error: {e}")
@@ -813,10 +826,11 @@ def pipeline(detrender, sect_no, wdwle, make_plots = True): # PLEASE CHECK make_
 
             elif detrend.lower() == "notch":
                 ticstr = str(tic_id)
+                speech = False
                 # The failing line is below this.
-                print(f"Checking DataFrame state just before failure...")
-                print(f"DataFrame has {len(df)} rows.")
-                print(f"DataFrame columns: {df.columns}")
+                speech and print(f"Checking DataFrame state just before failure...")
+                speech and print(f"DataFrame has {len(df)} rows.")
+                speech and print(f"DataFrame columns: {df.columns}")
                 if 'tic_id' not in df.columns:
                     print("WARNING: 'tic_id' column is missing!")
                 if tic_id in df["tic_id"].values: # the .values is required for changing it from pandas to a numpy array so that we can use the "in" function
