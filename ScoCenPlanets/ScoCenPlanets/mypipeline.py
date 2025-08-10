@@ -449,7 +449,7 @@ def bin_lightcurve(time, flux, bin_minutes=30):
 
     return np.array(binned_time), np.array(binned_flux)
 
-def pipeline(detrender, sect_no, wdwle, make_plots = False): # PLEASE CHECK make_plots, IF YOU RUN IT AGAIN WHEN FALSE, NOTCH DATAFRAME
+def pipeline(detrender, sect_no, wdwle, make_plots = True): # PLEASE CHECK make_plots, IF YOU RUN IT AGAIN WHEN FALSE, NOTCH DATAFRAME
     # GETS ERASED!!!!!!!! ##### BE EXTRA CERTAIN THAT THE FILE HAS SAVED WHEN YOU MAKE THAT CHANGE TO TRUE !!!!
     "IMPORTED EVERYTHING OUTSIDE NOW THAT I'M CHUNKING EVERYTHING"
     sector_number = sect_no
@@ -588,7 +588,7 @@ def pipeline(detrender, sect_no, wdwle, make_plots = False): # PLEASE CHECK make
                 if os.path.exists(rapid_rotators_path):
                     with open(rapid_rotators_path, "r") as f:
                         exist_rotator = set(line.strip() for line in f)
-                        if tic_id not in exist_rotator:
+                        if str(tic_id) not in exist_rotator:
                             with open(rapid_rotators_path, "a") as f:
                                 f.write(f"{tic_id}\n")
                 continue
