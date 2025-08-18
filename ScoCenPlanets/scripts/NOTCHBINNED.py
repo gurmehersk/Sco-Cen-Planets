@@ -66,6 +66,25 @@ def sde_calc(power_spectrum, periods, window_width=0.1, harmonics=3):
         it makes sense.
     Returns:
         sde: The calculated SDE, to 2 significant figures
+
+
+    TLS documentation mentions that the SDE is defined as:
+
+        I want to take a moment to also discuss how i am calcualting this sde analog. I went through the TLS documentation, 
+        where they use something called Spectral Ratios. TLS doesn't really build a power spectrum similar to BLS, it tries to
+        minimize chi squared values of different transit fits at each trial period. I.E., at each trial period, it computes a chi2
+        value, and then they define a "Spectral Ratio" as the ratio of the minimum chi2 value to the chi2 value at the trial period P.
+        They then do SDE = ( 1 - np.mean(Spectral Ratio) ) / (np.nanstd(Spectral Ratio)). They are using this philosophy of the peak
+        being 1 because of the way they defined the spectral ratios, and are saying: SDE = peak [here 1] - mean (without removing 
+        the 1 peak though) / standard deviation of the spectral ratios without removing the peaks.
+
+    Our Implementation:
+    
+        This seems a little less efficint because they are essentially doing what we are also trying, but we are trying to do
+        peak of the power spectrum - median of power spectrum without the peaks / the MAD of the power spectrum without the peaks.
+        This analog of the SDE seems to me to be more robust as it accounts the fact that the peaks would influence the "scatter." 
+        which should NOT be the case. 
+
     """
     # Copy the power spectrum to avoid modifying the original
     modified_power_spectrum = power_spectrum.copy()
@@ -73,9 +92,10 @@ def sde_calc(power_spectrum, periods, window_width=0.1, harmonics=3):
     # Find the index of the maximum peak
     peak_index = np.argmax(modified_power_spectrum)
     peak_power = modified_power_spectrum[peak_index]
-    peak_period = periods[peak_index] # here frequency means period
+    peak_period = periods[peak_index] # Get the period corresponding to the peak power
 
     multipliers = [0.5,1,2]
+    # Just a check to ensure I never accidentally change the number of harmonics
     if len(multipliers) == harmonics:
         pass
     else:
@@ -83,21 +103,30 @@ def sde_calc(power_spectrum, periods, window_width=0.1, harmonics=3):
     # Suppress the peak and its harmonics
     for harmonic in multipliers:
         harmonic_period = peak_period * harmonic
+        # i am aware that the 2nd harmonic, i.e. multipliers = 2 is redundant for a lot of the higher orbital 
+        # periods, especially in the true positives cases that I tested it with. However, considering how on average I was finding low 
+        # orbital period planets, I think it is better to keep it in the code, so that we can suppress the 2nd harmonic.
+
         # Find indices within the window around the harmonic frequency
+        # this is where I was stating that the window_width is actually the half width, since we are going +/-
         window_indices = np.where(
             (periods >= harmonic_period - window_width) &
             (periods <= harmonic_period + window_width)
         )[0]
         # Suppress the power in the window
-        modified_power_spectrum[window_indices] = np.nan  # Exclude from calculations
+        modified_power_spectrum[window_indices] = np.nan  # Exclude from calculations by making it a nan value 
 
-    # Calculate the median power without the peaks
+    # Calculate the median power without the peaks, not including those that have now are nan
+    # Additionally, wwe are making these changes to the modified_power_spectrum to avoid any reference pass that changes the 
+    # original array 
     median_power = np.nanmedian(modified_power_spectrum)
 
     # Calculate the MAD (Median Absolute Deviation)
     mad_power = np.nanmedian(np.abs(modified_power_spectrum - median_power))
 
     # Calculate the SDE
+    # I believe this analog calculation works? I think that's the formula usually used
+    # It is peak - the median excluding the peak(s) / deviation of the power
     sde = (peak_power - median_power) / mad_power
 
     return sde
