@@ -12,6 +12,9 @@ from numpy import array as nparr, all as npall, isfinite as npisfinite
 import numpy.lib.recfunctions as rfn
 from collections import OrderedDict
 from copy import deepcopy
+from astropy.timeseries import BoxLeastSquares 
+
+### 15th August --> run with likelihood, and not just snr 
 # 28th July post meeting notes 
 # normalize so median is 1, and transits are below 1, but above 0. normalize it using the range
 # and also flip 
@@ -36,6 +39,68 @@ from copy import deepcopy
 # also, it doesn't seem to be too robust, I don't get the hype 
 
 # ADD LS periodogram to be consistent about window length!
+
+
+
+# 18th Aug
+### My current concern is to jsut be able to find a more robust way to look at this window_width factor. I don't think
+### it should be a constant value, but I think it should work at the same time?
+def sde_calc(power_spectrum, periods, window_width=0.1, harmonics=3):
+    """
+    We want to calculate the SDE while excluding peak period and its harmonics.
+    
+    The reason we want to calculate the SDE is because when i was running the SNR and likelihood implementation for
+    88297141, the SNR, and likelihood were higher, but pretty close to the "no transit" star condition. This had me
+    worried for quite a bit because it indicates that SNR and likelihood are not good indicators of transit detection.
+    So, we want to calculate the SDE, which then showed me a stark difference in the values found on both. 
+
+    Arguments:
+        power_spectrum: The power spectrum which is either SNR or likelihood.
+        frequencies : The PERIODS of the power spectrum. It is named frequencies due to the LS analogy.
+        window_width: The width of the window to suppress peaks and harmonics. The window width is actually 
+        the half width, since we are going +\- the window_width around the peak frequencies.
+        harmonics: Number of harmonics to suppress for each peak, we always keep this as 3 because we want to surpress
+        0.5,1 and 2 harmonics of the peak frequency. --> we aren't using the harmonics variable anywhere, but it's just 
+        kept there to remind ourself that the multipliers column should have harmonics number always
+        I realize that keeping the 2 harmonic is a bit redundant for high orbital period planets, but for lower ones 
+        it makes sense.
+    Returns:
+        sde: The calculated SDE, to 2 significant figures
+    """
+    # Copy the power spectrum to avoid modifying the original
+    modified_power_spectrum = power_spectrum.copy()
+
+    # Find the index of the maximum peak
+    peak_index = np.argmax(modified_power_spectrum)
+    peak_power = modified_power_spectrum[peak_index]
+    peak_period = periods[peak_index] # here frequency means period
+
+    multipliers = [0.5,1,2]
+    if len(multipliers) == harmonics:
+        pass
+    else:
+        raise ValueError(f"Number of harmonics ({harmonics}) does not match the length of multipliers ({len(multipliers)}).")
+    # Suppress the peak and its harmonics
+    for harmonic in multipliers:
+        harmonic_period = peak_period * harmonic
+        # Find indices within the window around the harmonic frequency
+        window_indices = np.where(
+            (periods >= harmonic_period - window_width) &
+            (periods <= harmonic_period + window_width)
+        )[0]
+        # Suppress the power in the window
+        modified_power_spectrum[window_indices] = np.nan  # Exclude from calculations
+
+    # Calculate the median power without the peaks
+    median_power = np.nanmedian(modified_power_spectrum)
+
+    # Calculate the MAD (Median Absolute Deviation)
+    mad_power = np.nanmedian(np.abs(modified_power_spectrum - median_power))
+
+    # Calculate the SDE
+    sde = (peak_power - median_power) / mad_power
+
+    return sde
 
 def create_downlink_mask(
     time: np.ndarray,
@@ -321,22 +386,27 @@ def _run_notch(TIME, FLUX, dtr_dict, verbose=False):
 
     return flat_flux, trend_flux, notch
 
-tic_id = 441420236
-# 166527623 , the hip star isnt working --> wrong period everytime --> it isnt detecting the planet transit, but artificial transits --> /home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2023096110322-s0064-0000000166527623-0257-s/tess2023096110322-s0064-0000000166527623-0257-s_lc.fits
-# reason behind hip not working could very well be due to the binning process which removes the transit [makes it shallower, refer to the window20 issue]
+tic_id = 166527623
+# 166527623 , the hip star isnt working --> wrong period everytime --> it isnt detecting the planet transit, but artificial transits --> 
+# /home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2023096110322-s0064-0000000166527623-0257-s/tess2023096110322-s0064-0000000166527623-0257-s_lc.fits
+# reason behind hip not working could very well be due to the binning process which removes the transit 
+# [makes it shallower, refer to the window20 issue] --> ISSUE FIXED
+
+# 152479118 --> /home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2025071122000-s0090-0000000152479118-0287-s/tess2025071122000-s0090-0000000152479118-0287-s_lc.fits
+# THE ABOVE IS A NO DETECTION SIGNAL STAR, it is a reference star that has no planet
 
 # created due to data downlinks --> big problem --> similar to what wotan did in many cases, maybe jumped over possible other transits
 # in a similar fashion/way --> i remember trying to find a way to remove these earlier, just to remove any dips near data downtime regions,
 # but i couldnt figure out a way to do this, maybe talk to luke about this. 
 
-# 441420236, AU Mic b worked with this pipeline --> /home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2020186164531-s0027-0000000441420236-0189-s/tess2020186164531-s0027-0000000441420236-0189-s_lc.fits
+# 441420236 --> tried bls on this, AU Mic b worked with this pipeline --> /home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2020186164531-s0027-0000000441420236-0189-s/tess2020186164531-s0027-0000000441420236-0189-s_lc.fits
 # 460205581, TOI 837b, Luke's planet worked. --> /home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2025071122000-s0090-0000000460205581-0287-s/tess2025071122000-s0090-0000000460205581-0287-s_lc.fits
-
-# 146520535 , not working --> orbital period is wrong --> /home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2020324010417-s0032-0000000146520535-0200-s/tess2020324010417-s0032-0000000146520535-0200-s_lc.fits
-
-# Major point to note, the flattened flux method is much better than the deltabic thing which sometimes just doesnt work --> returns nans
-path = "/home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2020186164531-s0027-0000000441420236-0189-s/tess2020186164531-s0027-0000000441420236-0189-s_lc.fits"
-pdfpath = f"/home/gurmeher/gurmeher/Notch_and_LOCoR/results/TIC_{tic_id}_normal_neg1check.pdf"
+# 88297141 --> /home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2025127075000-s0092-0000000088297141-0289-s/tess2025127075000-s0092-0000000088297141-0289-s_lc.fits
+# 146520535 , TOI 942 not working --> orbital period is wrong --> /home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2020324010417-s0032-0000000146520535-0200-s/tess2020324010417-s0032-0000000146520535-0200-s_lc.fits
+objective = "likelihood"
+#objective = "snr"
+path = "/home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2023096110322-s0064-0000000166527623-0257-s/tess2023096110322-s0064-0000000166527623-0257-s_lc.fits"
+pdfpath = f"/home/gurmeher/gurmeher/Notch_and_LOCoR/results/TIC_{tic_id}_{objective}.pdf"
 
 hdu_list = fits.open(path)
 hdr = hdu_list[0].header
@@ -383,26 +453,30 @@ assert len(pdc_time_binned) == len(pdc_flux_binned)
 #print(f"Time length: {len(time)}, Flux length: {len(pdcsap_flux)}")
 #print(f"Valid points: {np.sum(np.isfinite(pdcsap_flux))}")
 
-downtimemask = create_downlink_mask(pdc_time_binned)
-pdc_time_binned = pdc_time_binned[downtimemask]
-pdc_flux_binned = pdc_flux_binned[downtimemask]
+#downtimemask = create_downlink_mask(pdc_time_binned)
+#pdc_time_binned = pdc_time_binned[downtimemask]
+#pdc_flux_binned = pdc_flux_binned[downtimemask]
 
 fig, axs = plt.subplots(nrows = 6, figsize = (6,10), sharex = False)
 axs[0].scatter(pdc_time_binned, pdc_flux_binned, s = 0.5, zorder = 2, color = 'black')
 #flat_flux, trend_flux, notch = _run_notch(pdc_time_binned, pdc_flux_binned/np.nanmedian(pdc_flux_binned), dictionary)
-flat_flux, trend_flux, notch = _run_notch(pdc_time_binned, pdc_flux_binned/np.nanmedian(pdc_flux_binned), dictionary)
+flat_flux, trend_flux, notch = _run_notch(pdc_time_binned, pdc_flux_binned, dictionary)
 
 axs[1].scatter(pdc_time_binned , flat_flux, s = 0.5)
 axs[0].plot(pdc_time_binned, trend_flux, color = 'red', linewidth = 1.5, zorder = 1)
 
+dbic = notch.deltabic * -1
 delbic = notch.deltabic * -1
 median_val = np.nanmedian(delbic)
 min_val = np.min(delbic)
 shift = delbic - min_val # this makes the minimum value 0
 scale_factor = median_val - min_val # the scale factor isnt range, but rather median - min
 delbic = shift/scale_factor 
-
-axs[2].scatter(pdc_time_binned, delbic, color = 'pink', s = 0.5)
+transit_model = "bls"
+if transit_model == "tls":
+    axs[2].scatter(pdc_time_binned, delbic, color = 'pink', s = 0.5)
+else:
+    axs[2].scatter(pdc_time_binned, dbic, color = 'pink', s =0.5)
 print(f"DELTABIC VALUES BEFORE ANY PROCESSING: {notch.deltabic}")
 
 #print(f"pdc_time_binned: {pdc_time_binned}")
@@ -414,69 +488,123 @@ print(f"DELTABIC VALUES BEFORE ANY PROCESSING: {notch.deltabic}")
 
 if len(pdc_time_binned) == 0:
     raise ValueError("pdc_time_binned is empty!")
+
+
+
     
-model1 = transitleastsquares(pdc_time_binned, delbic)
-model2 = transitleastsquares(pdc_time_binned, flat_flux)
+### 14th AUGUST --> WITHOUT ANY RENORMALIZATION OF THE DELTABIC, WE ARE NOW TRYING TO FIND THE DETECTED DIP 
+### USING BOXLEASTSQUARES! 
+if transit_model == "bls":
+    model1 = BoxLeastSquares(pdc_time_binned, dbic) # setting dy = None
+    model2 = BoxLeastSquares(pdc_time_binned, flat_flux)
+
+elif transit_model == "tls":
+    model1 = transitleastsquares(pdc_time_binned, delbic)
+    model2 = transitleastsquares(pdc_time_binned, flat_flux)
 
 min_period = 0.5  # days, or a bit more than your cadence
 max_period = (pdc_time_binned.max() - pdc_time_binned.min()) / 2
 
-results1 = model1.power(period_min = min_period, period_max = max_period) # now inputting minimum and maximum period to try and fix valueError of empty TLS
-results2 = model2.power(period_min = min_period, period_max = max_period)
+if transit_model == "bls":
+    durations = np.linspace(0.01, 1, 75)
+    ### if objective unspecified, bls assumes objective = 'likelihood'
+    results1 = model1.autopower(durations, objective='likelihood')
+    results2 = model2.autopower(durations, objective='likelihood')
 
-period1 = results1.period
-period2 = results2.period
+    best_idx = np.argmax(results1.power)
+    best_period = results1.period[best_idx]
+    best_depth = results1.depth[best_idx]
+    best_transit_time = results1.transit_time[best_idx]
+    #best_snr = results1.depth_snr[best_idx]
+    best_power = results1.power[best_idx]
 
-sde1 = results1.SDE
-sde2 = results2.SDE
+    # testing window size
+    left = best_period - 0.1
+    right = best_period + 0.1
 
-tls_t0 = results2.T0
+    harmonics = [0.5, 2]  # Example harmonic multipliers
+    harmonic_lines = [(best_period * h - 0.1, best_period * h + 0.1) for h in harmonics]
 
-# Compute all expected transit times within observed time span
-epochs = np.arange(-1000, 1000)
-transit_times = tls_t0 + (period2 * epochs)
-# Compute a y-position slightly below the light curve's minimum flux
-y_marker = np.nanmin(flat_flux) - 0.005  # or adjust the offset
 
-# Only keep transits that fall within your light curve time span
-in_transit = (transit_times > pdc_time_binned.min()) & (transit_times < pdc_time_binned.max())
-visible_transits = transit_times[in_transit]
+    axs[3].plot(results1.period, results1.power)
+    axs[3].axvline(left, color = 'red', linestyle ='--')
+    axs[3].axvline(right, color = 'red', linestyle ='--')
 
-axs[3].scatter(results1.folded_phase, results1.folded_y, marker = 'o', s = 0.25, color = 'black', label = f'SAP phase-folded\nTLS Period = {period1:.4f} d\nSDE = {sde1:.2f}')
-axs[3].plot(results1.model_folded_phase, results1.model_folded_model, color = 'red', label = 'TLS MODEL for SAP Flux')
-axs[4].scatter(results2.folded_phase, results2.folded_y, marker = 'o', s = 0.25, color = 'black', label = f'PDCSAP phase-folded\nTLS Period = {period2:.4f} d\nSDE = {sde2:.2f}')
-axs[4].plot(results2.model_folded_phase, results2.model_folded_model, color = 'red', label = 'TLS MODEL for PDCSAP Flux')
-periods = results1.periods
-powers = results1.power
+    for i, (h_left, h_right) in enumerate(harmonic_lines):
+        axs[3].axvline(h_left, color='green', linestyle='--', label=f"Harmonic {i+1} - 0.1")
+        axs[3].axvline(h_right, color='purple', linestyle='--', label=f"Harmonic {i+1} + 0.1")
 
-axs[5].plot(periods, powers, color='black')
-axs[5].set_xlabel("Trial Period (days)")
-axs[5].set_ylabel("TLS Power (SDE)")
-axs[5].set_title("TLS Detection Spectrum")
-for t in visible_transits:
-    axs[0].scatter(t, y_marker, marker='^', color='blue', s=20, zorder=3, label='Transit time' if t==visible_transits[0] else "")
+    axs[4].plot(results2.period, results2.power)
+
+    print(f"Period = {best_period}")
+    print(f"Depth = {best_depth}")
+    print(f"Transit Time = {best_transit_time}")
+    #print(f"SNR = {best_snr}")
+    ### peak snr only needed if we are using the snr method 
+    print(f"Power = {best_power}")
+else:
+    results1 = model1.power(period_min = min_period, period_max = max_period) # now inputting minimum and maximum period to try and fix valueError of empty TLS
+    results2 = model2.power(period_min = min_period, period_max = max_period)
+
+    period1 = results1.period
+    period2 = results2.period
+
+    sde1 = results1.SDE
+    sde2 = results2.SDE
+
+    tls_t0 = results2.T0
+
+    # Compute all expected transit times within observed time span
+    epochs = np.arange(-1000, 1000)
+    transit_times = tls_t0 + (period2 * epochs)
+    # Compute a y-position slightly below the light curve's minimum flux
+    y_marker = np.nanmin(flat_flux) - 0.005  # or adjust the offset
+
+    # Only keep transits that fall within your light curve time span
+    in_transit = (transit_times > pdc_time_binned.min()) & (transit_times < pdc_time_binned.max())
+    visible_transits = transit_times[in_transit]
+
+    axs[3].scatter(results1.folded_phase, results1.folded_y, marker = 'o', s = 0.25, color = 'black', label = f'SAP phase-folded\nTLS Period = {period1:.4f} d\nSDE = {sde1:.2f}')
+    axs[3].plot(results1.model_folded_phase, results1.model_folded_model, color = 'red', label = 'TLS MODEL for SAP Flux')
+    axs[4].scatter(results2.folded_phase, results2.folded_y, marker = 'o', s = 0.25, color = 'black', label = f'PDCSAP phase-folded\nTLS Period = {period2:.4f} d\nSDE = {sde2:.2f}')
+    axs[4].plot(results2.model_folded_phase, results2.model_folded_model, color = 'red', label = 'TLS MODEL for PDCSAP Flux')
+    periods = results1.periods
+    powers = results1.power
+
+    axs[5].plot(periods, powers, color='black')
+    axs[5].set_xlabel("Trial Period (days)")
+    axs[5].set_ylabel("TLS Power (SDE)")
+    axs[5].set_title("TLS Detection Spectrum")
+    for t in visible_transits:
+        axs[0].scatter(t, y_marker, marker='^', color='blue', s=20, zorder=3, label='Transit time' if t==visible_transits[0] else "")
+        
+    counts = count_points_per_window(pdc_time_binned, dictionary['window_length'])
+
+
+    #axs[3].scatter(pdc_time_binned, counts, lw=0.8)
+    #axs[3].set_xlabel("Time [days]")
+    #axs[3].set_ylabel("# of points in window")
+
+
+    print(f"Number of sliding windows used by notch: {len(notch.t)}")
+    print(f"NUMBER OF DATA POINTS IN TOTAL: {len(pdc_time_binned)}")
+    txtpath = "/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/scripts/timechecker.txt"
+
+    with open(txtpath, "w") as f:
+        for i in pdc_time_binned:
+            f.write(str(i) + "\n")
+
     
-counts = count_points_per_window(pdc_time_binned, dictionary['window_length'])
+    print(prot)
 
-
-#axs[3].scatter(pdc_time_binned, counts, lw=0.8)
-#axs[3].set_xlabel("Time [days]")
-#axs[3].set_ylabel("# of points in window")
-
-
-print(f"Number of sliding windows used by notch: {len(notch.t)}")
-print(f"NUMBER OF DATA POINTS IN TOTAL: {len(pdc_time_binned)}")
-txtpath = "/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/scripts/timechecker.txt"
-
-with open(txtpath, "w") as f:
-    for i in pdc_time_binned:
-        f.write(str(i) + "\n")
+    print(delbic)
 
 for ax in axs:
-    ax.legend()
-print(prot)
-
+        ax.legend()
 print(delbic)
+print(np.max(notch.deltabic))
+sde = sde_calc(results1.power, results1.period, window_width= 0.1)
+print(f"SDE: {sde:.2f}")
 with PdfPages(pdfpath) as pdf:
     pdf.savefig(fig, bbox_inches = 'tight')
     plt.close(fig)
