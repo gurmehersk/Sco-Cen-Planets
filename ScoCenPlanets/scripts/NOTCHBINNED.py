@@ -13,6 +13,17 @@ import numpy.lib.recfunctions as rfn
 from collections import OrderedDict
 from copy import deepcopy
 from astropy.timeseries import BoxLeastSquares 
+import lightkurve as lk
+from os.path import join
+import pickle
+
+
+
+### 25th September 2025, 
+# To calculate the detection statistiv for a nominal period liek 4.64 days
+# i need to just evaluate the BLS model at the specified period. 
+
+
 
 ### 15th August --> run with likelihood, and not just snr 
 # 28th July post meeting notes 
@@ -45,7 +56,7 @@ from astropy.timeseries import BoxLeastSquares
 # 18th Aug
 ### My current concern is to jsut be able to find a more robust way to look at this window_width factor. I don't think
 ### it should be a constant value, but I think it should work at the same time?
-def sde_calc(power_spectrum, periods, window_width=0.1, harmonics=3):
+def sde_calc(power_spectrum, periods, results1, window_width=0.1, harmonics=3):
     """
     We want to calculate the SDE while excluding peak period and its harmonics.
     
@@ -89,10 +100,18 @@ def sde_calc(power_spectrum, periods, window_width=0.1, harmonics=3):
     # Copy the power spectrum to avoid modifying the original
     modified_power_spectrum = power_spectrum.copy()
 
+    # peak_index = np.argmin(np.abs(modified_power_spectrum- 4.64))
+    peak_index = np.argmax(modified_power_spectrum) # 28th Sept, going back to original implementation for multiple pixel testing
+    peak_power = results1.period[peak_index]
+    peak_depth = results1.depth[peak_index]
+    best_transit_time = results1.transit_time[peak_index]
+    #best_snr = results1.depth_snr[best_idx]
+    peak_power = results1.power[peak_index]
+    peak_period = results1.period[peak_index]
     # Find the index of the maximum peak
-    peak_index = np.argmax(modified_power_spectrum)
-    peak_power = modified_power_spectrum[peak_index]
-    peak_period = periods[peak_index] # Get the period corresponding to the peak power
+    #peak_index = np.argmax(modified_power_spectrum)
+    #peak_power = modified_power_spectrum[peak_index]
+    #peak_period = periods[peak_index] # Get the period corresponding to the peak power
 
     multipliers = [0.5,1,2]
     # Just a check to ensure I never accidentally change the number of harmonics
@@ -226,14 +245,14 @@ def clipit(data, low, high, method, center):
     """Clips data in the current segment"""
 
     # For the center point, take the median (if center_code==0), else the mean
-    if center == 'mad':
+    if center == 'median': # earlier, this was center == 'mad', changed this on 25th sept
         mid = np.nanmedian(data)
     else:
         mid = np.nanmean(data)
     data = np.nan_to_num(data)
     diff = data - mid
 
-    if method == 'median':
+    if method == 'mad': # earlier, this was method == 'median', clipping doesn't seem to be working. changed this on 25th sept
         cutoff = np.nanmedian(np.abs(data - mid))
     else:
         cutoff = np.nanstd(data)
@@ -415,7 +434,21 @@ def _run_notch(TIME, FLUX, dtr_dict, verbose=False):
 
     return flat_flux, trend_flux, notch
 
-tic_id = 166527623
+tic_id = 88297141
+# 24th September 162093661 run 
+
+### 24th September --> Trying the tpfplotter pixel thing with 88297141. We start with the main target pixel, and then run 
+### the notch detrending on just that pixel, then we do it around the 9 pixels around that point in the tpf clean thing as 
+### demonstrated by Luke in the "custom_aperture_hack.txt" file he sent on my ucla email.
+
+
+### 7th September --> TIC 1450801333, which might be the cause of stellar blend for 88297141
+
+# 26th Aug Multisector analysis for TIC 460538679
+### Issue because i was looking at sector 36, 37 and then 90
+
+# 27th August, Multisector analysis for TIC 34288057, which has data from sector 88,89,90
+
 # 166527623 , the hip star isnt working --> wrong period everytime --> it isnt detecting the planet transit, but artificial transits --> 
 # /home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2023096110322-s0064-0000000166527623-0257-s/tess2023096110322-s0064-0000000166527623-0257-s_lc.fits
 # reason behind hip not working could very well be due to the binning process which removes the transit 
@@ -428,33 +461,118 @@ tic_id = 166527623
 # in a similar fashion/way --> i remember trying to find a way to remove these earlier, just to remove any dips near data downtime regions,
 # but i couldnt figure out a way to do this, maybe talk to luke about this. 
 
+
+## 808308902 --> another null, no transit --> /home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2025042113628-s0089-0000000808308902-0286-s/tess2025042113628-s0089-0000000808308902-0286-s_lc.fits
+
 # 441420236 --> tried bls on this, AU Mic b worked with this pipeline --> /home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2020186164531-s0027-0000000441420236-0189-s/tess2020186164531-s0027-0000000441420236-0189-s_lc.fits
 # 460205581, TOI 837b, Luke's planet worked. --> /home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2025071122000-s0090-0000000460205581-0287-s/tess2025071122000-s0090-0000000460205581-0287-s_lc.fits
 # 88297141 --> /home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2025127075000-s0092-0000000088297141-0289-s/tess2025127075000-s0092-0000000088297141-0289-s_lc.fits
 # 146520535 , TOI 942 not working --> orbital period is wrong --> /home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2020324010417-s0032-0000000146520535-0200-s/tess2020324010417-s0032-0000000146520535-0200-s_lc.fits
 objective = "likelihood"
 #objective = "snr"
-path = "/home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2023096110322-s0064-0000000166527623-0257-s/tess2023096110322-s0064-0000000166527623-0257-s_lc.fits"
-pdfpath = f"/home/gurmeher/gurmeher/Notch_and_LOCoR/results/TIC_{tic_id}_{objective}.pdf"
+
+sector_number = 92
+pickle_path = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/results/notch_v2_Aug_2025/pickle/sector{sector_number}/"
+pickle_file = join(pickle_path, f"TIC_{tic_id}.pkl")
+
+with open(pickle_file, 'rb') as f:
+        data_val = pickle.load(f)
+
+transit_time = data_val['Best_Transit_Time']
+
+pdfpath = f"/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/scripts/notch_logs_sept/discussion_w_Luke/TIC_{tic_id}_tpf_bottom_pixel_s92_2909.pdf"
+'''path = "/home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2021065132309-s0036-0000000460538679-0207-s/tess2021065132309-s0036-0000000460538679-0207-s_lc.fits"
+
 
 hdu_list = fits.open(path)
 hdr = hdu_list[0].header
 data = hdu_list[1].data
-time = data['TIME']
+time1 = data['TIME']
 tessmag = hdr.get('TESSMAG', 'N/A')
 tempeff = hdr.get('TEFF', 'N/A')
-pdcsap_flux = data['PDCSAP_FLUX']
+
+path2 = "/home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2021091135823-s0037-0000000460538679-0208-s/tess2021091135823-s0037-0000000460538679-0208-s_lc.fits"
+hdu_list2 = fits.open(path2)
+data2 = hdu_list2[1].data
+time2 = data2['TIME']
+
+path3 = "/home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2025071122000-s0090-0000000460538679-0287-s/tess2025071122000-s0090-0000000460538679-0287-s_lc.fits"
+hdu_list3 = fits.open(path3)
+data3 = hdu_list3[1].data
+time3 = data3['TIME']
+time3 = time3 - np.nanmin(time3) + np.nanmax(time2) + 0.2 # to offset time3 so that it is after time2
+
+normalized = data['PDCSAP_FLUX']/np.nanmedian(data['PDCSAP_FLUX'])
+normalized2 = data2['PDCSAP_FLUX']/np.nanmedian(data2['PDCSAP_FLUX'])
+normalized3 = data3['PDCSAP_FLUX']/np.nanmedian(data3['PDCSAP_FLUX'])
+time = np.concatenate((time1, time2, time3))# time3
+pdcsap_flux = np.concatenate((normalized, normalized2, normalized3))#, data3['PDCSAP_FLUX']))'''
+
+
+
+### 24th September tpf plotter implementation starts here
+
+### 26th September, for TIC 88297141, r[0].download is for sector91, while r[1].download is for sector92
+r = lk.search_targetpixelfile(f"TIC {tic_id}")
+tpf = r[1].download() # sector 92
+fitspath = tpf.path
+hdul = fits.open(fitspath)
+hdul.info()
+d = hdul[1].data
+
+time = d['TIME']
+flux_imgs = d['FLUX']
+
+aperture = hdul[2].data
+### optimal_aperture = aperture ==  43
+
+## here, center is 43, but the others, i.e. the ones surrounding this are all 41 quality wise --> ideally should have lower depth.
+central_aperture = np.array([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]).astype(bool)
+# we are trying to get the entire '+' aperture and we will check whether this is similar to what we got in our initial run
+
+#flux = flux_imgs[:, central_aperture].flatten() 
+# we do the above only if we are checking one pixel
+
+
+flux = flux_imgs[:, central_aperture].flatten()
+# now we are checking multiple pixels in the aperture and we want to retain the cadence structure of the flux. 
+
+### 24th September tpf plotter implemenetation ends here 
+
+'''print(f"TIC {tic_id}")
+print("Shape of time1:", time1.shape)
+print("Shape of time2:", time2.shape)
+#print("Shape of time3:", time3.shape)
+print("Shape of pdcsap_flux:", pdcsap_flux.shape)
+
 qual = data['QUALITY']
-bkgd = data['SAP_BKG'] # TODO : PLOT ME!
+#bkgd = data['SAP_BKG'] # TODO : PLOT ME!
 mask = np.isfinite(time) & np.isfinite(pdcsap_flux)
 time_clean = time[mask]
-flux_clean = pdcsap_flux[mask] / np.nanmedian(pdcsap_flux[mask])
+flux_clean = pdcsap_flux[mask] / np.nanmedian(pdcsap_flux[mask])'''
 
 
-pdc_time_binned, pdc_flux_binned = time_clean, flux_clean
+flux = flux / np.nanmedian(flux)
+mask = np.isfinite(time) & np.isfinite(flux)
+flux = flux[mask]
+time = time[mask]
+
+pdc_time_binned, pdc_flux_binned = time, flux # TRYING TPF PLOTTER STUFF on UNBINNED DATA STILL
+
+#pdc_time_binned, pdc_flux_binned = time_clean, flux_clean
 # TRYING UNBINNED, UNCOMMENT BELOW TO USE BINNED ^ IT MENTIONS BINNED BUT ITS ACTUALLY UNBINNED
 #pdc_time_binned, pdc_flux_binned = bin_lightcurve(time_clean, flux_clean)
-
+real_binned_time, real_flux_binned = bin_lightcurve(pdc_time_binned, pdc_flux_binned)
 
 
 #pdc_time_binned, pdc_flux_binned = bin_lightcurve(time, pdcsap_flux/np.nanmedian(pdcsap_flux))
@@ -486,13 +604,48 @@ assert len(pdc_time_binned) == len(pdc_flux_binned)
 #pdc_time_binned = pdc_time_binned[downtimemask]
 #pdc_flux_binned = pdc_flux_binned[downtimemask]
 
-fig, axs = plt.subplots(nrows = 6, figsize = (6,10), sharex = False)
-axs[0].scatter(pdc_time_binned, pdc_flux_binned, s = 0.5, zorder = 2, color = 'black')
+
+
+#28th September, repurposing the plotting structure to something more concrete as done during pipeline implementation
+mosaic = (
+            """
+            AAAAAAAAAAAAAAAAA
+            AAAAAAAAAAAAAAAAA
+            AAAAAAAAAAAAAAAAA
+            BBBBBBBBBBBBBBBBB
+            BBBBBBBBBBBBBBBBB
+            BBBBBBBBBBBBBBBBB
+            CCCCCCCCCCCCCCCCC
+            CCCCCCCCCCCCCCCCC
+            CCCCCCCCCCCCCCCCC
+            DDDDDDDDDDDDDDDDD
+            DDDDDDDDDDDDDDDDD
+            DDDDDDDDDDDDDDDDD
+            EEEEEEEEEEEEEEEEE
+            EEEEEEEEEEEEEEEEE
+            EEEEEEEEEEEEEEEEE
+            FFFFGGGHHHIIIJJJJ
+            FFFFGGGHHHIIIJJJJ
+            """)
+subplotter, plaxes = plt.subplot_mosaic(mosaic, figsize=(19, 14 ))
+#fig, axs = plt.subplots(nrows = 6, figsize = (6,10), sharex = False)
+
+plt.subplots_adjust(hspace=0.3)
+plaxes['A'].set_title(f"DETRENDING TIC {tic_id}")
+plaxes['A'].scatter(real_binned_time, real_flux_binned, zorder =2,  s = 5, color = 'black')
+plaxes['A'].set_xticks([])
+#axs[0].scatter(pdc_time_binned, pdc_flux_binned, s = 0.5, zorder = 2, color = 'black')
 #flat_flux, trend_flux, notch = _run_notch(pdc_time_binned, pdc_flux_binned/np.nanmedian(pdc_flux_binned), dictionary)
 flat_flux, trend_flux, notch = _run_notch(pdc_time_binned, pdc_flux_binned, dictionary)
 
-axs[1].scatter(pdc_time_binned , flat_flux, s = 0.5)
-axs[0].plot(pdc_time_binned, trend_flux, color = 'red', linewidth = 1.5, zorder = 1)
+
+
+time_flat, flat_flux_binned = bin_lightcurve(pdc_time_binned, flat_flux, bin_minutes=30) # we want to see the binned flat_flux
+print(f"TIME length = {len(time_flat)}")
+print(f"FLAT length = {len(flat_flux)}")
+
+plaxes['B'].scatter(time_flat , flat_flux_binned, s = 0.5)
+plaxes['A'].plot(pdc_time_binned, trend_flux, color = 'red', linewidth = 1.5, zorder = 1)
 
 dbic = notch.deltabic * -1
 delbic = notch.deltabic * -1
@@ -503,9 +656,9 @@ scale_factor = median_val - min_val # the scale factor isnt range, but rather me
 delbic = shift/scale_factor 
 transit_model = "bls"
 if transit_model == "tls":
-    axs[2].scatter(pdc_time_binned, delbic, color = 'pink', s = 0.5)
+    plaxes['C'].scatter(pdc_time_binned, delbic, color = 'pink', s = 0.5)
 else:
-    axs[2].scatter(pdc_time_binned, dbic, color = 'pink', s =0.5)
+    plaxes['C'].scatter(pdc_time_binned, dbic, color = 'pink', s =0.5)
 print(f"DELTABIC VALUES BEFORE ANY PROCESSING: {notch.deltabic}")
 
 #print(f"pdc_time_binned: {pdc_time_binned}")
@@ -535,17 +688,47 @@ min_period = 0.5  # days, or a bit more than your cadence
 max_period = (pdc_time_binned.max() - pdc_time_binned.min()) / 2
 
 if transit_model == "bls":
-    durations = np.linspace(0.01, 1, 75)
-    ### if objective unspecified, bls assumes objective = 'likelihood'
-    results1 = model1.autopower(durations, objective='likelihood')
-    results2 = model2.autopower(durations, objective='likelihood')
+    durations = np.linspace(0.01, 0.49, 75)
 
-    best_idx = np.argmax(results1.power)
+    '''print("time1 min:", np.nanmin(time1))
+    print("time1 max:", np.nanmax(time1))
+    print("baseline:", np.nanmax(time1) - np.nanmin(time1))
+    print("maximum_period:", (np.nanmax(time1) - np.nanmin(time1))/2)
+    print("durations:", durations)
+    print("durations > 0?", np.all(np.array(durations) > 0))
+
+    ### if objective unspecified, bls assumes objective = 'likelihood'
+    results1 = model1.autopower(durations, minimum_period = 1.1, maximum_period = (np.nanmax(time1)-np.nanmin(time1))/2.0, objective='likelihood')
+    results2 = model2.autopower(durations, minimum_period = 1.1, maximum_period = (np.nanmax(time1)-np.nanmin(time1))/2.0, objective='likelihood')'''
+    ### 27th August --> the autpower function, according to BLS documentation creates a periodgrid
+    ###  that scans from a minimum period of 0.5 days 
+
+    ### if obejctive unspecified, which we won't, bls assumes objective = 'likelihood'
+    ### if i made the minimum_period = 0.5, on the ' + ' aperture, the orbital period detected is actually 0.9 days
+    results1 = model1.autopower(durations, minimum_period = 1, maximum_period = (np.nanmax(time) - np.nanmin(time))/2.0, objective = 'likelihood')
+    results2 = model2.autopower(durations, minimum_period = 1, maximum_period = (np.nanmax(time) - np.nanmin(time))/2.0, objective = 'likelihood')
+
+    '''best_idx = np.argmax(results1.power)
+    best_period = results1.period[best_idx]
+    best_depth = results1.depth[best_idx]
+    best_transit_time = results1.transit_time[best_idx]
+    #best_snr = results1.depth_snr[best_idx]
+    best_power = results1.power[best_idx]'''
+
+    # the above implementation works when wanting to find the period
+
+    # now, we already know the period in the case of trying to find the power 
+    # for a target pixel file, at that particular period
+    # so,
+
+    #best_idx = np.argmin(np.abs(results1.period - 4.64))
+    best_idx = np.argmax(results1.power) # 28th September --> going back to our original implementation for a second
     best_period = results1.period[best_idx]
     best_depth = results1.depth[best_idx]
     best_transit_time = results1.transit_time[best_idx]
     #best_snr = results1.depth_snr[best_idx]
     best_power = results1.power[best_idx]
+
 
     # testing window size
     left = best_period - 0.1
@@ -555,15 +738,32 @@ if transit_model == "bls":
     harmonic_lines = [(best_period * h - 0.1, best_period * h + 0.1) for h in harmonics]
 
 
-    axs[3].plot(results1.period, results1.power)
-    axs[3].axvline(left, color = 'red', linestyle ='--')
-    axs[3].axvline(right, color = 'red', linestyle ='--')
+    plaxes['D'].plot(results1.period, results1.power)
+    plaxes['D'].axvline(left, color = 'red', linestyle ='--')
+    plaxes['D'].axvline(right, color = 'red', linestyle ='--')
 
+    epochs = np.arange(-1000, 1000)
+    transit_times = transit_time + (best_period * epochs)
+    in_transit = (transit_times > time.min()) & (transit_times < time.max())
+    visible_transits = transit_times[in_transit]
+    y_marker = np.nanmin(flat_flux) - 0.005
+
+    for t in visible_transits:
+        plaxes['A'].scatter(t, y_marker, marker='^', color='blue', s=20, zorder=3, label='Transit time' if t==visible_transits[0] else "")
+        plaxes['B'].scatter(t, y_marker, marker = '^', color = 'blue', s=20, zorder=3, label='Transit time' if t == visible_transits[0] else "")
+        plaxes['C'].scatter(t,y_marker, marker = '^', color = 'blue', s=20, zorder=3, label='Transit time' if t == visible_transits[0] else "")
     for i, (h_left, h_right) in enumerate(harmonic_lines):
-        axs[3].axvline(h_left, color='green', linestyle='--', label=f"Harmonic {i+1} - 0.1")
-        axs[3].axvline(h_right, color='purple', linestyle='--', label=f"Harmonic {i+1} + 0.1")
+        plaxes['D'].axvline(h_left, color='green', linestyle='--', label=f"Harmonic {i+1} - 0.1")
+        plaxes['D'].axvline(h_right, color='purple', linestyle='--', label=f"Harmonic {i+1} + 0.1")
 
-    axs[4].plot(results2.period, results2.power)
+    plaxes['E'].plot(results1.period, results1.power) # deltabics' power spectrum 
+
+    ylimitsap = plaxes['A'].get_ylim()
+    pdcsapstd = np.nanstd(pdc_flux_binned)
+    yupsap = 1 + 2.5*pdcsapstd if np.isfinite(pdcsapstd) else 1.02
+    ylowsap = 0.93
+    if np.isfinite(ylowsap) and np.isfinite(yupsap):
+        plaxes['A'].set_ylim(ylowsap, yupsap)
 
     print(f"Period = {best_period}")
     print(f"Depth = {best_depth}")
@@ -628,12 +828,17 @@ else:
 
     print(delbic)
 
-for ax in axs:
-        ax.legend()
+'''for ax in axs:
+        ax.legend()'''
 print(delbic)
 print(np.max(notch.deltabic))
-sde = sde_calc(results1.power, results1.period, window_width= 0.1)
+sde = sde_calc(results1.power, results1.period, results1, window_width= 0.1)
 print(f"SDE: {sde:.2f}")
+''''
 with PdfPages(pdfpath) as pdf:
     pdf.savefig(fig, bbox_inches = 'tight')
-    plt.close(fig)
+    plt.close(fig)'''
+
+subplotter.tight_layout()
+subplotter.savefig(pdfpath, bbox_inches='tight', format='pdf')
+plt.close(subplotter)
