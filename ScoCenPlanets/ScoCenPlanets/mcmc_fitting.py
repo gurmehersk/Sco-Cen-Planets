@@ -237,12 +237,12 @@ with pm.Model() as transit_model:
     # Time of transit center
     ## for the ephermerises, in the future, here's where the transit will happen.
     ### order of magnitude of sigma should be 10-^-1
-    t0_var = pm.Normal("t0", mu=t0, sigma=0.005) ### 0.1
+    t0_var = pm.Normal("t0", mu=t0, sigma=0.1) ### 0.1
 
     # Orbital period
     # .01 days --> don't want a prior that biases the uncertainties that we get.
     ### include the errors and the uncertainties, etc.
-    period_var = pm.Normal("period", mu=p, sigma=0.001)
+    period_var = pm.Normal("period", mu=p, sigma=0.01)
 
     # Radius ratio (Rp/Rs)
     ror_var = pm.Uniform("ror", lower=0.01, upper=0.3)
