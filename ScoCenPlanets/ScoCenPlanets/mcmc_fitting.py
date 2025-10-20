@@ -251,7 +251,11 @@ with pm.Model() as transit_model:
 
     # Impact parameter
     #### from 0 to 1 + R
-    b_var = pm.Uniform("b", lower=0.0, upper=1.0+(ror_var))
+    b_var = pm.Uniform("b", lower=0.0, upper=1.0+(pt.exp(log_ror_var)))
+
+    ### currently, if I simply try b_var = pm.Uniform("b", lower=0.0, upper=1.0+(ror_var)), it gives an error
+    ### can't have upper limit depend on another variable [like it isnt a number, its a pymc tensor]. So we do the following:
+    # b_var = pm.Uniform("b", lower=0.0, upper= 1.0 + pt.exp(log_ror_var))
 
     # Stellar density (ρ*, g/cm³)
     rho_star_var = pm.Normal("rho_star", mu=1.0, sigma=0.5)
@@ -328,7 +332,7 @@ plt.plot(time_clean, model_lc, color="C1", label="Median Model")
 plt.xlabel("Time")
 plt.ylabel("Normalized Flux")
 plt.legend()
-plt.savefig("mcmc_10_11_TIC88297141.pdf", bbox_inches="tight")
+plt.savefig("mcmc_10_20_TIC88297141.pdf", bbox_inches="tight")
 plt.close()
 
 import corner, numpy as np, matplotlib.pyplot as plt
@@ -345,7 +349,7 @@ samples = np.vstack([
 labels = [r"$t_0$", r"$P$", r"$R_p/R_s$", r"$b$", r"$\rho_\star$"]
 
 fig = corner.corner(samples, labels=labels, show_titles=True, title_fmt=".5f")
-fig.savefig("corner_plot_TIC88297141.pdf", bbox_inches="tight")
+fig.savefig("corner_plot_20_11_TIC88297141.pdf", bbox_inches="tight")
 
 plt.show()
 plt.close()
