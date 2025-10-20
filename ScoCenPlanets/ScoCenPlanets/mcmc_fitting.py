@@ -251,7 +251,11 @@ with pm.Model() as transit_model:
 
     # Impact parameter
     #### from 0 to 1 + R
-    b_var = pm.Uniform("b", lower=0.0, upper=1.0+(pt.exp(log_ror_var)))
+    b_var = pm.Uniform("b", lower=0.0, upper=1.3)
+
+    ### update on the comment below. Even that doesnt work. The best fix is probably what i have done above,
+    ### which just makes the upper limit 1.0 + max(Rp/Rs) which makes sense to put as an upper bound for the
+    ### grazing condition. 
 
     ### currently, if I simply try b_var = pm.Uniform("b", lower=0.0, upper=1.0+(ror_var)), it gives an error
     ### can't have upper limit depend on another variable [like it isnt a number, its a pymc tensor]. So we do the following:
@@ -325,14 +329,55 @@ model_lc = ld_model.get_light_curve(
 
 
 time_clean_bin, flatten_clean_bin = bin_lightcurve(time_clean, flatten_clean)
+
+phase_data = ((time_clean_bin - t0_med + 0.5 * period_med) % period_med) / period_med - 0.5
+phase_model = ((time_clean - t0_med + 0.5 * period_med) % period_med) / period_med - 0.5
+
+# Sort by phase (for smoother plotting)
+sort_idx = np.argsort(phase_data)
+phase_sorted = phase_data[sort_idx]
+flux_sorted = flatten_clean_bin[sort_idx]
+
+sort_idx_model = np.argsort(phase_model)
+model_phase_sorted = phase_model[sort_idx_model]
+model_sorted = model_lc[sort_idx_model]
+
+import pickle 
+
+model_dict = {
+    "tic_id": tic_id,
+    "time_clean": time_clean,
+    "flatten_clean": flatten_clean,
+    "model_lc": model_lc,
+    "phase": phase_data,
+    "t0_med": t0_med,
+    "period_med": period_med,
+    "ror_med": ror_med,
+    "b_med": b_med,
+    "rho_star_med": rho_star_med,
+    "u_med": u_med,
+    "mean_offset_med": mean_offset_med,
+}
+
+cache_dir = "cached_models"
+os.makedirs(cache_dir, exist_ok=True)
+# Pickle file path
+model_path = os.path.join(cache_dir, f"TIC{tic_id}_20_10_mcmc_model.pkl")
+
+with open(model_path, "wb") as f:
+    pickle.dump(model_dict, f)
+
+
+
+
 # --- Plot ---
 plt.figure(figsize=(10, 6))
-plt.scatter(time_clean_bin, flatten_clean_bin, s=5, color="k", alpha=0.3, label="Data")
-plt.plot(time_clean, model_lc, color="C1", label="Median Model")
-plt.xlabel("Time")
+plt.scatter(phase_sorted, flux_sorted, s=5, color="k", alpha=0.3, label="Data")
+plt.plot(model_phase_sorted, model_sorted, color="C1", label="Median Model")
+plt.xlabel("Phase")
 plt.ylabel("Normalized Flux")
 plt.legend()
-plt.savefig("mcmc_10_20_TIC88297141.pdf", bbox_inches="tight")
+plt.savefig("mcmc_10_20_TIC88297141_phase_fold.pdf", bbox_inches="tight")
 plt.close()
 
 import corner, numpy as np, matplotlib.pyplot as plt
