@@ -249,6 +249,13 @@ with pm.Model() as transit_model:
     ror_var = pm.Deterministic("ror", pt.exp(log_ror_var)) # this is done to ensure that the impact parameter is correctly 
     # sampled within the limits we create. Also, this was recommende by copilot [lol]
 
+    ### an important distinction to make above is that while the pm.sampler samples log_ror_var uniformly, the actual physical parameter
+    ### Rp/Rs that we are measuring, is automatically "transformed" by the sampler when we run the lc_model.
+    ### this is important because the transit depth is proportional to (Rp/Rs)^2, so sampling uniformly in Rp/Rs would bias the results
+    ### towards larger values. By sampling in log space, we ensure that we are sampling more
+    ### evenly across the range of possible transit depths.
+
+
     # Impact parameter
     #### from 0 to 1 + R
     b_var = pm.Uniform("b", lower=0.0, upper=1.3)
