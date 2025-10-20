@@ -245,8 +245,9 @@ with pm.Model() as transit_model:
     period_var = pm.Normal("period", mu=p, sigma=0.01)
 
     # Radius ratio (Rp/Rs)
-    ror_var = pm.Uniform("ror", lower=0.01, upper=0.3)
-    
+    log_ror_var = pm.Uniform("log_ror", lower=np.log(0.01), upper=np.log(0.3))
+    ror_var = pm.Deterministic("ror", pt.exp(log_ror_var)) # this is done to ensure that the impact parameter is correctly 
+    # sampled within the limits we create. Also, this was recommende by copilot [lol]
 
     # Impact parameter
     #### from 0 to 1 + R
