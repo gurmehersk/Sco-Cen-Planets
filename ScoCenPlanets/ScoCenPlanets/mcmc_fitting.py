@@ -314,7 +314,7 @@ with pm.Model() as transit_model:
         target_accept=0.9,
         return_inferencedata=True,
         cores=2,
-        init = "adapt_diag"
+        init = "adapt_diag",
         initvals={"b": 0.5}
     )
 
