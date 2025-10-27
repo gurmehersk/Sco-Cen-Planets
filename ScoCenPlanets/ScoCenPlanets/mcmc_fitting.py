@@ -408,11 +408,11 @@ def phase_bin(phase, flux, bins=100):
         Median flux values in each bin 
         
     '''
-    phase = phase % 1  # wrap phase to [0, 1]
-    bin_edges = np.linspace(0, 1, bins + 1) # creates bin number of bins between 0 and 1, since it is folded between 0 and 1
+    #phase = phase % 1  # wrap phase to [0, 1]
+    bin_edges = np.linspace(-0.5, 0.5, bins + 1) # creates bin number of bins between 0 and 1, since it is folded between 0 and 1
     bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1]) # calcualtes the center point of each bin 
     digitized = np.digitize(phase, bin_edges) - 1 # to assign the right bin for each object in the array list 
-
+    #bin_centers -= 0.5  # shift centers to be between -0.5 and 0.5
     binned_flux = [np.nanmedian(flux[digitized == i]) if np.any(digitized == i) else np.nan for i in range(bins)] # checks if bin is 
     #empty, returns nan if true
 
