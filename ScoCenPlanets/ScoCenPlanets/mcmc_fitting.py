@@ -30,6 +30,7 @@ import exoplanet as xo
 import pytensor.tensor as pt
 import arviz as az
 
+
 def clipit(data, low, high, method, center):
     """Clips data in the current segment"""
 
@@ -208,9 +209,7 @@ time_clean, flatten_clean = clean_arrays(time,flatten_lc)
 ### fit transits!
 
 
-### recovered parameters 
-t0 = 3803.23
-p = 4.6370567442246955
+
 
 import pymc as pm
 import pytensor.tensor as pt
@@ -230,6 +229,11 @@ import numpy as np
 
 ### for period --> +/- 1 or few days , you want an informative prior. A uniform prior +/- 10% of the period
 ### periodogram might not be a 100% accurate --> allow for such stuff. We want the uncertainties on the period and 
+
+### recovered parameters 
+t0 = 3803.23
+p = 4.6370567442246955
+
 with pm.Model() as transit_model:
 
     ### Priors
@@ -255,10 +259,15 @@ with pm.Model() as transit_model:
     ### towards larger values. By sampling in log space, we ensure that we are sampling more
     ### evenly across the range of possible transit depths.
 
+    # important note to self: pm.Deterministic 
+    # is PyMC's way of saying: "This is a quantity I want to track even though I'm not directly sampling it
 
     # Impact parameter
-    #### from 0 to 1 + R
-    b_var = pm.Uniform("b", lower=0.0, upper=1.3)
+    #### from 0 to 1 + Rp/Rs for grazing transits, just did max to avoid dependency issues
+    #b_var = pm.Uniform("b", lower=0.0, upper=1.3)
+
+
+    b_var = xo.distributions.ImpactParameter("b", ror=ror_var) # new method to implement the ror_var dependency in the impact parameter
 
     ### update on the comment below. Even that doesnt work. The best fix is probably what i have done above,
     ### which just makes the upper limit 1.0 + max(Rp/Rs) which makes sense to put as an upper bound for the
@@ -304,7 +313,9 @@ with pm.Model() as transit_model:
         draws=2000,
         target_accept=0.9,
         return_inferencedata=True,
-        cores=2
+        cores=2,
+        init = "adapt_diag"
+        initvals={"b": 0.5}
     )
 
 # --- Post-processing ---
@@ -369,22 +380,53 @@ model_dict = {
 cache_dir = "cached_models"
 os.makedirs(cache_dir, exist_ok=True)
 # Pickle file path
-model_path = os.path.join(cache_dir, f"TIC{tic_id}_20_10_mcmc_model.pkl")
+model_path = os.path.join(cache_dir, f"TIC{tic_id}_26_10_mcmc_model.pkl")
 
 with open(model_path, "wb") as f:
     pickle.dump(model_dict, f)
 
+def phase_bin(phase, flux, bins=100):
+    '''
+    This function bins the flux data by phase, to get those little blue dots
 
+    Parameters
+    ----------
+    phase : array-like
+        Phase folded time values
+    flux : array-like
+        Flux values for every time point
+    bins : int
+        Number of bins to create
+    
+    Returns
+    -------
+    bin_centers : array-like
+        Centers of the bins
+    binned_flux : array-like
+        Median flux values in each bin 
+        
+    '''
+    phase = phase % 1  # wrap phase to [0, 1]
+    bin_edges = np.linspace(0, 1, bins + 1) # creates bin number of bins between 0 and 1, since it is folded between 0 and 1
+    bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1]) # calcualtes the center point of each bin 
+    digitized = np.digitize(phase, bin_edges) - 1 # to assign the right bin for each object in the array list 
 
+    binned_flux = [np.nanmedian(flux[digitized == i]) if np.any(digitized == i) else np.nan for i in range(bins)] # checks if bin is 
+    #empty, returns nan if true
+
+    return bin_centers, np.array(binned_flux)
+
+bin_phase, bin_flux = phase_bin(phase_sorted, flux_sorted, bins=100)
 
 # --- Plot ---
-plt.figure(figsize=(10, 6))
+plt.figure(figsize=(19, 10))
 plt.scatter(phase_sorted, flux_sorted, s=5, color="k", alpha=0.3, label="Data")
+plt.scatter(bin_phase, bin_flux, s = 40, color = 'dodgerblue', label = 'Binned Data', zorder = 2)
 plt.plot(model_phase_sorted, model_sorted, color="C1", label="Median Model")
 plt.xlabel("Phase")
 plt.ylabel("Normalized Flux")
 plt.legend()
-plt.savefig("mcmc_10_20_TIC88297141_phase_fold.pdf", bbox_inches="tight")
+plt.savefig("mcmc_10_26_TIC88297141_phase_fold.pdf", bbox_inches="tight")
 plt.close()
 
 import corner, numpy as np, matplotlib.pyplot as plt
@@ -401,7 +443,7 @@ samples = np.vstack([
 labels = [r"$t_0$", r"$P$", r"$R_p/R_s$", r"$b$", r"$\rho_\star$"]
 
 fig = corner.corner(samples, labels=labels, show_titles=True, title_fmt=".5f")
-fig.savefig("corner_plot_20_11_TIC88297141.pdf", bbox_inches="tight")
+fig.savefig("corner_plot_26_10_TIC88297141.pdf", bbox_inches="tight")
 
 plt.show()
 plt.close()
