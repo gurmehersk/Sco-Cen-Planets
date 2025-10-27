@@ -264,10 +264,14 @@ with pm.Model() as transit_model:
 
     # Impact parameter
     #### from 0 to 1 + Rp/Rs for grazing transits, just did max to avoid dependency issues
-    #b_var = pm.Uniform("b", lower=0.0, upper=1.3)
+    b_var = pm.Uniform("b", lower=0.0, upper=1.3)
 
+    #b_norm = pm.Uniform("b_norm", lower=0.0, upper=1.0)  # normalized impact parameter between 0 and 1
 
-    b_var = xo.distributions.ImpactParameter("b", ror=ror_var) # new method to implement the ror_var dependency in the impact parameter
+    # what this does is, now scales it manually between 0 and 1 + Rp/Rs, which is what we want.
+    #b_var = pm.Deterministic("b", b_norm * (1.0 + ror_var))  # scale to [0, 1 + Rp/Rs]
+
+    #b_var = xo.distributions.ImpactParameter("b", ror=ror_var, testval = 0.5) # new method to implement the ror_var dependency in the impact parameter
 
     ### update on the comment below. Even that doesnt work. The best fix is probably what i have done above,
     ### which just makes the upper limit 1.0 + max(Rp/Rs) which makes sense to put as an upper bound for the
@@ -293,8 +297,8 @@ with pm.Model() as transit_model:
 
     # Light curve model
     lc_model = xo.LimbDarkLightCurve(u_var).get_light_curve(
-        orbit=orbit_var, r=ror_var, t=time_clean
-    )
+        orbit=orbit_var, r= ror_var, t=time_clean
+    ) # this was first r = ror_var, changed to reshape because got an error
     lc_model = pt.sum(lc_model, axis=-1)
 
     # Flux offset
@@ -314,8 +318,6 @@ with pm.Model() as transit_model:
         target_accept=0.9,
         return_inferencedata=True,
         cores=2,
-        init = "adapt_diag",
-        initvals={"b": 0.5}
     )
 
 # --- Post-processing ---
