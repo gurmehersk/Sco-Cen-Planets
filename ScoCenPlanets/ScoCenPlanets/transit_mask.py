@@ -4,6 +4,9 @@ transit_mask.py
 Module to run transit_mask on TIC 88297141 lightcurve.
 Let's use notch this time, since we are only looking at one PC.
 
+Update, we will use wotan, cuz notch required BLS, 
+and we want to use transit_mask right now, available on TLS.
+
 '''
 from astropy.io import fits
 import mypipeline as mp
@@ -95,4 +98,16 @@ if __name__ == "__main__":
     plaxes['A'].set_title(f"DETRENDING TIC {tic_id}")
     plaxes['A'].scatter(real_binned_time, real_flux_binned, zorder =2,  s = 5, color = 'black')
     plaxes['A'].set_xticks([])
+
+
+    flat_flux, trend_flux, notch = nb._run_notch(time, normalized_flux, dictionary)
+    time_flat, flat_flux_binned = nb.bin_lightcurve(time, flat_flux, bin_minutes=30)
+
+    plaxes['B'].scatter(time_flat , flat_flux_binned, s = 0.5)
+    plaxes['A'].plot(time, trend_flux, color = 'red', linewidth = 1.5, zorder = 1)
+
+    transit_model = "tls"
+
+    if transit_model == "tls":
+
 
