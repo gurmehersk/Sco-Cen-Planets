@@ -138,7 +138,7 @@ ax1.errorbar(dataset.times_lc['TESS'], dataset.data_lc['TESS'], \
 # Plot the (full, transit + GP) model:
 ax1.plot(dataset.times_lc['TESS'], transit_plus_GP_model, color='black',zorder=10)
 
-ax1.set_xlim([1328,1350])
+ax1.set_xlim([t0-10,t0+10])
 ax1.set_ylim([0.96,1.04])
 ax1.set_xlabel('Time (BJD - 2457000)')
 ax1.set_ylabel('Relative flux')
