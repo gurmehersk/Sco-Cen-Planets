@@ -378,137 +378,148 @@ initial_params = initial_transit + initial_gp
 #### THIS PART IS VIBE CODED COMPLETELY:
 
 # -------------------------------------------------------
-# 7. OPTIMISE FIRST (good starting point for MCMC)
+# EVERYTHING BELOW RUNS ONLY IN THE MAIN PROCESS
+# This guard is REQUIRED for multiprocessing to work —
+# without it Python spawns infinite child processes
 # -------------------------------------------------------
-def neg_log_prob(params, t, flux, ferr):
-    lp = log_prob(params, t, flux, ferr)
-    return -lp if np.isfinite(lp) else 1e10
+if __name__ == "__main__":
 
-print("Optimizing...")
-soln = minimize(
-    neg_log_prob,
-    initial_params,
-    args=(t_clean, flux_clean, ferr_clean),
-    method="L-BFGS-B"
-)
-print(f"Optimization success: {soln.success}")
-print(f"Best t0  = {soln.x[0]:.6f}")
-print(f"Best per = {soln.x[1]:.6f}")
-print(f"Best rp  = {soln.x[2]:.4f}")
-print(f"Best a   = {soln.x[3]:.3f}")
-print(f"Best inc = {soln.x[4]:.3f}")
+    # -------------------------------------------------------
+    # 9. OPTIMISE FIRST (good starting point for MCMC)
+    # -------------------------------------------------------
+    def neg_log_prob(params, t, flux, ferr):
+        lp = log_prob(params, t, flux, ferr)
+        return -lp if np.isfinite(lp) else 1e10
 
-# Plot prediction at optimized params before MCMC
-best = soln.x
-flux_tr  = transit_model(t_clean, *best[:7])
-gp_opt   = build_gp(best[7:], t_clean, ferr_clean)
-mu, var  = gp_opt.predict(flux_clean - flux_tr, t=t_clean, return_var=True)
+    print("Optimizing...")
+    soln = minimize(
+        neg_log_prob,
+        initial_params,
+        args=(t_clean, flux_clean, ferr_clean),
+        method="L-BFGS-B"
+    )
+    print(f"Optimization success: {soln.success}")
+    print(f"Best t0  = {soln.x[0]:.6f}")
+    print(f"Best per = {soln.x[1]:.6f}")
+    print(f"Best rp  = {soln.x[2]:.4f}")
+    print(f"Best a   = {soln.x[3]:.3f}")
+    print(f"Best inc = {soln.x[4]:.3f}")
 
-fig, axes = plt.subplots(2, 1, figsize=(14, 8), sharex=True)
-axes[0].plot(t_clean, flux_clean, 'k.', ms=1, alpha=0.3, label='data')
-axes[0].plot(t_clean, flux_tr + mu, 'r-', lw=1, label='transit + GP')
-axes[0].fill_between(t_clean, flux_tr + mu - np.sqrt(var),
-                               flux_tr + mu + np.sqrt(var), color='r', alpha=0.2)
-axes[0].set_ylabel("Normalised Flux")
-axes[0].legend(fontsize=8)
-axes[1].plot(t_clean, flux_clean - flux_tr - mu, 'k.', ms=1, alpha=0.3)
-axes[1].axhline(0, color='r', lw=1)
-axes[1].set_ylabel("Residuals")
-axes[1].set_xlabel("Time (BTJD)")
-plt.tight_layout()
-plt.savefig("optimized_fit.png", dpi=300)
-plt.close()
-print("Saved: optimized_fit.png")
+    # Plot optimized fit before MCMC — sanity check this looks reasonable
+    # before committing to a long MCMC run
+    best    = soln.x
+    flux_tr = transit_model(t_clean, *best[:7])
+    gp_opt  = build_gp(best[7:], t_clean, ferr_clean)
+    mu, var = gp_opt.predict(flux_clean - flux_tr, t=t_clean, return_var=True)
+
+    fig, axes = plt.subplots(2, 1, figsize=(14, 8), sharex=True)
+    axes[0].plot(t_clean, flux_clean, 'k.', ms=1, alpha=0.3, label='data')
+    axes[0].plot(t_clean, flux_tr + mu, 'r-', lw=1, label='transit + GP')
+    axes[0].fill_between(t_clean,
+                         flux_tr + mu - np.sqrt(var),
+                         flux_tr + mu + np.sqrt(var), color='r', alpha=0.2)
+    axes[0].set_ylabel("Normalised Flux")
+    axes[0].legend(fontsize=8)
+    axes[1].plot(t_clean, flux_clean - flux_tr - mu, 'k.', ms=1, alpha=0.3)
+    axes[1].axhline(0, color='r', lw=1)
+    axes[1].set_ylabel("Residuals")
+    axes[1].set_xlabel("Time (BTJD)")
+    plt.tight_layout()
+    plt.savefig("optimized_fit.png", dpi=300)
+    plt.close()
+    print("Saved: optimized_fit.png")
+
+    # -------------------------------------------------------
+    # 10. MCMC WITH EMCEE + MULTIPROCESSING
+    # -------------------------------------------------------
+    ndim     = len(initial_params)
+    nwalkers = 64
+    ncores   = os.cpu_count()
+    print(f"Using {ncores} cores for MCMC")
+
+    # Start walkers in tiny ball around optimizer solution
+    coords = soln.x + 1e-5 * np.random.randn(nwalkers, ndim)
+
+    with Pool(ncores) as pool:
+        sampler = emcee.EnsembleSampler(
+            nwalkers, ndim, log_prob,
+            args=(t_clean, flux_clean, ferr_clean),
+            pool=pool
+        )
+
+        print("Running burn-in (2000 steps)...")
+        state = sampler.run_mcmc(coords, 2000, progress=True)
+        sampler.reset()
+
+        print("Running production (5000 steps)...")
+        sampler.run_mcmc(state, 5000, progress=True)
+
+    # Convergence check
+    try:
+        tau = sampler.get_autocorr_time(quiet=True)
+        print(f"Autocorrelation times: {np.round(tau, 1)}")
+        print(f"Effective samples:     {np.round(5000 / tau, 1)}")
+    except Exception:
+        print("Could not compute autocorrelation times — may need more steps")
+
+    # -------------------------------------------------------
+    # 11. RESULTS
+    # -------------------------------------------------------
+    flat_samples = sampler.get_chain(discard=500, thin=15, flat=True)
+
+    labels = [
+        "t0", "per", "rp", "a", "inc", "u1", "u2",
+        "mean", "log_sigma", "log_period", "log_Q0", "log_dQ", "log_f", "log_jitter"
+    ]
+
+    print("\n--- Transit Parameters ---")
+    for i, label in enumerate(labels[:7]):
+        lo, mid, hi = np.percentile(flat_samples[:, i], [16, 50, 84])
+        print(f"  {label:10s} = {mid:.5f} + {hi-mid:.5f} - {mid-lo:.5f}")
+
+    # Corner plot — transit params only
+    fig = corner.corner(
+        flat_samples[:, :7],
+        labels=labels[:7],
+        quantiles=[0.16, 0.5, 0.84],
+        show_titles=True,
+        title_kwargs={"fontsize": 10}
+    )
+    fig.savefig("corner_transit.png", dpi=150)
+    plt.close()
+    print("Saved: corner_transit.png")
+
+    # -------------------------------------------------------
+    # 12. FINAL PLOT — posterior predictive
+    # -------------------------------------------------------
+    best_params  = np.median(flat_samples, axis=0)
+    flux_transit = transit_model(t_clean, *best_params[:7])
+    gp_final     = build_gp(best_params[7:], t_clean, ferr_clean)
+    residuals    = flux_clean - flux_transit
+    mu, var      = gp_final.predict(residuals, t=t_clean, return_var=True)
+
+    fig, axes = plt.subplots(2, 1, figsize=(14, 8), sharex=True)
+    axes[0].plot(t_clean, flux_clean, 'k.', ms=1, alpha=0.3, label='data')
+    axes[0].plot(t_clean, flux_transit + mu, 'r-', lw=1.2,
+                 label='transit + GP (median posterior)')
+    axes[0].fill_between(
+        t_clean,
+        flux_transit + mu - np.sqrt(var),
+        flux_transit + mu + np.sqrt(var),
+        color='r', alpha=0.2, label='1σ GP uncertainty'
+    )
+    axes[0].set_ylabel("Normalised Flux")
+    axes[0].legend(fontsize=8)
+    axes[1].plot(t_clean, flux_clean - flux_transit - mu, 'k.', ms=1, alpha=0.3)
+    axes[1].axhline(0, color='r', lw=1)
+    axes[1].set_ylabel("Residuals")
+    axes[1].set_xlabel("Time (BTJD)")
+    plt.tight_layout()
+    plt.savefig("final_fit.png", dpi=300)
+    plt.close()
+    print("Saved: final_fit.png")
+    print("Done.")
 
 
-# -------------------------------------------------------
-# 8. MCMC WITH EMCEE
-# -------------------------------------------------------
-ndim     = len(initial_params)
-nwalkers = 64
-
-# Start walkers in tiny ball around optimizer solution
-coords = soln.x + 1e-5 * np.random.randn(nwalkers, ndim)
-
-sampler = emcee.EnsembleSampler(
-    nwalkers, ndim, log_prob,
-    args=(t_clean, flux_clean, ferr_clean)
-)
-
-print("Running burn-in (2000 steps)...")
-state = sampler.run_mcmc(coords, 2000, progress=True)
-sampler.reset()
-
-print("Running production (5000 steps)...")
-sampler.run_mcmc(state, 5000, progress=True)
-
-# Convergence check
-try:
-    tau = sampler.get_autocorr_time(quiet=True)
-    print(f"Autocorrelation times: {np.round(tau, 1)}")
-    print(f"Effective samples: {5000 / tau}")
-except Exception:
-    print("Could not compute autocorrelation times — may need more steps")
 
 
-# -------------------------------------------------------
-# 9. RESULTS
-# -------------------------------------------------------
-flat_samples = sampler.get_chain(discard=500, thin=15, flat=True)
-
-labels = [
-    "t0", "per", "rp", "a", "inc", "u1", "u2",
-    "mean", "log_sigma", "log_period", "log_Q0", "log_dQ", "log_f", "log_jitter"
-]
-
-# Print median + 1sigma for transit params
-print("\n--- Transit Parameters ---")
-for i, label in enumerate(labels[:7]):
-    lo, mid, hi = np.percentile(flat_samples[:, i], [16, 50, 84])
-    print(f"  {label:5s} = {mid:.5f} + {hi-mid:.5f} - {mid-lo:.5f}")
-
-# Corner plot (transit params only — 7 params)
-fig = corner.corner(
-    flat_samples[:, :7],
-    labels=labels[:7],
-    quantiles=[0.16, 0.5, 0.84],
-    show_titles=True,
-    title_kwargs={"fontsize": 10}
-)
-fig.savefig("corner_transit.png", dpi=150)
-plt.close()
-print("Saved: corner_transit.png")
-
-
-# -------------------------------------------------------
-# 10. FINAL PLOT — posterior predictive
-# -------------------------------------------------------
-best_params  = np.median(flat_samples, axis=0)
-flux_transit = transit_model(t_clean, *best_params[:7])
-gp_final     = build_gp(best_params[7:], t_clean, ferr_clean)
-residuals    = flux_clean - flux_transit
-mu, var      = gp_final.predict(residuals, t=t_clean, return_var=True)
-
-fig, axes = plt.subplots(2, 1, figsize=(14, 8), sharex=True)
-
-axes[0].plot(t_clean, flux_clean, 'k.', ms=1, alpha=0.3, label='data')
-axes[0].plot(t_clean, flux_transit + mu, 'r-', lw=1.2, label='transit + GP (median posterior)')
-axes[0].fill_between(
-    t_clean,
-    flux_transit + mu - np.sqrt(var),
-    flux_transit + mu + np.sqrt(var),
-    color='r', alpha=0.2, label='1σ GP uncertainty'
-)
-axes[0].set_ylabel("Normalised Flux")
-axes[0].legend(fontsize=8)
-
-axes[1].plot(t_clean, flux_clean - flux_transit - mu, 'k.', ms=1, alpha=0.3)
-axes[1].axhline(0, color='r', lw=1)
-axes[1].set_ylabel("Residuals")
-axes[1].set_xlabel("Time (BTJD)")
-
-plt.tight_layout()
-plt.savefig("final_fit.png", dpi=300)
-plt.close()
-print("Saved: final_fit.png")
-print("Done.")
