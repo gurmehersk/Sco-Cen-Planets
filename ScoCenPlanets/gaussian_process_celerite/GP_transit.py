@@ -156,6 +156,23 @@ T0_KNOWN = 3803.23  # T0 for TESS
 PER_KNOWN = 4.6370  # days
 ROT_KNOWN = 1.8099  # days
 
+
+## we are going to do something similar to a fold of the t0 parameter here
+# Find all transit times within your data
+t_start = t_clean.min()
+t_end   = t_clean.max()
+
+N_start = np.ceil((t_start - T0_KNOWN) / PER_KNOWN)
+N_end   = np.floor((t_end   - T0_KNOWN) / PER_KNOWN)
+
+all_T0s = T0_KNOWN + np.arange(N_start, N_end + 1) * PER_KNOWN
+print(f"Transit times in your data: {all_T0s}")
+print(f"Number of transits: {len(all_T0s)}")
+
+# Use the first one as your reference T0 for the prior
+T0_ref = all_T0s[0]
+
+
 plt.figure(figsize=(14, 4))
 plt.plot(t_full, flux_full, 'k.', ms=1, alpha=0.4, label='raw')
 plt.plot(t_clean, flux_clean, 'r.', ms=1, alpha=0.5, label='clipped')
@@ -265,9 +282,13 @@ def log_prob(params, t, flux, ferr):
     '''
     TDL: fold the T0_known value here 
     '''
-    if not (T0_KNOWN  - 0.1  < t0  < T0_KNOWN  + 0.1):  return -np.inf 
+    if not (T0_ref - 0.2 * PER_KNOWN < t0 < T0_ref + 0.2 * PER_KNOWN):  return -np.inf
     ### okay i need to modify T0 somehow, fold it or something because the sampler might not 
     # catch the t0  we got in this  stitched setup. 
+
+    #### log g and T effecitive for limb darkening parameters, cuz we are fitting for limb darkening as well.
+    #### right now, we are finding these parameter values. My hope is that the transformation from u1 and u2 to log g and T
+    ### is relatively straightforward. 
 
     if not (PER_KNOWN - 0.1 < per < PER_KNOWN + 0.1):  return -np.inf
     if not (0.01 < rp  < 0.5):                            return -np.inf
@@ -288,5 +309,7 @@ def log_prob(params, t, flux, ferr):
     except Exception:
         return -np.inf
     
+
+### Initial params
 
 
