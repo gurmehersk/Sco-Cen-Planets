@@ -8,6 +8,7 @@ from astropy.io import fits
 import emcee
 import corner
 import batman
+from ldtk import LDPSetCreator, BoxcarFilter
 
 ### Just a few notes: we will be sigma clipping flares before GP fitting,
 ### recall that flares are not Guassian!
@@ -156,22 +157,42 @@ T0_KNOWN = 3803.23  # T0 for TESS
 PER_KNOWN = 4.6370  # days
 ROT_KNOWN = 1.8099  # days
 
+TEFF = 3265 # Kelvin, found on exofop
+
+# -------------------------------------------------------
+# LIMB DARKENING — get u1, u2 from ldtk for TESS bandpass
+# Uses Teff=3265K and assumes logg=4.5 (typical M dwarf)
+# These become the centres of Gaussian priors in the fit
+# -------------------------------------------------------
+print("Computing limb darkening coefficients from ldtk...")
+filters = [BoxcarFilter('tess', 600, 1000)]   # approximate TESS bandpass in nm
+sc = LDPSetCreator(
+    teff=(TEFF, 100),    # Teff +/- uncertainty
+    logg=(4.5,  0.2),    # logg +/- uncertainty (assumed typical M dwarf)
+    z=(0.0, 0.1),        # metallicity
+    filters=filters
+)
+ps     = sc.create_profiles(nsamples=500)
+coeffs = ps.coeffs_qd(do_mc=False)
+U1_LD  = float(coeffs[0][0][0])   # centre of Gaussian prior on u1
+U2_LD  = float(coeffs[0][0][1])   # centre of Gaussian prior on u2
+print(f"ldtk limb darkening: u1 = {U1_LD:.4f}, u2 = {U2_LD:.4f}")
+
 
 ## we are going to do something similar to a fold of the t0 parameter here
-# Find all transit times within your data
-t_start = t_clean.min()
-t_end   = t_clean.max()
 
-N_start = np.ceil((t_start - T0_KNOWN) / PER_KNOWN)
-N_end   = np.floor((t_end   - T0_KNOWN) / PER_KNOWN)
+# Find the transit epoch that actually falls inside our data window
+N_orbits   = np.round((t_full.mean() - T0_KNOWN) / PER_KNOWN)
+T0_in_data = T0_KNOWN + N_orbits * PER_KNOWN
+print(f"Data runs from {t_full.min():.2f} to {t_full.max():.2f} BTJD")
+print(f"T0 folded into data window: {T0_in_data:.6f} BTJD")
 
-all_T0s = T0_KNOWN + np.arange(N_start, N_end + 1) * PER_KNOWN
-print(f"Transit times in your data: {all_T0s}")
+# Sanity check — list all transits in the data
+N_start  = int(np.ceil( (t_full.min() - T0_KNOWN) / PER_KNOWN))
+N_end    = int(np.floor((t_full.max() - T0_KNOWN) / PER_KNOWN))
+all_T0s  = T0_KNOWN + np.arange(N_start, N_end + 1) * PER_KNOWN
+print(f"All transit times in data: {np.round(all_T0s, 4)}")
 print(f"Number of transits: {len(all_T0s)}")
-
-# Use the first one as your reference T0 for the prior
-T0_ref = all_T0s[0]
-
 
 plt.figure(figsize=(14, 4))
 plt.plot(t_full, flux_full, 'k.', ms=1, alpha=0.4, label='raw')
@@ -282,7 +303,7 @@ def log_prob(params, t, flux, ferr):
     '''
     TDL: fold the T0_known value here 
     '''
-    if not (T0_ref - 0.2 * PER_KNOWN < t0 < T0_ref + 0.2 * PER_KNOWN):  return -np.inf
+    if not (T0_in_data - 0.2 * PER_KNOWN < t0 < T0_in_data + 0.2 * PER_KNOWN):  return -np.inf
     ### okay i need to modify T0 somehow, fold it or something because the sampler might not 
     # catch the t0  we got in this  stitched setup. 
 
@@ -294,9 +315,27 @@ def log_prob(params, t, flux, ferr):
     if not (0.01 < rp  < 0.5):                            return -np.inf
     if not (1.0  < a   < 100.0):                          return -np.inf
     if not (60.0 < inc < 90.0):                           return -np.inf
-    if not (0.0  < u1  < 1.0):                            return -np.inf
-    if not (0.0  < u2  < 1.0):                            return -np.inf
-    if u1 + u2 > 1.0:                                     return -np.inf
+    if not (-0.5  < u1  < 1.5):                            return -np.inf
+    if not (-0.5  < u2  < 1.5):                            return -np.inf
+
+     # --- Gaussian prior on limb darkening from ldtk ---
+    # Centred on ldtk values, sigma=0.1 (tight but not fixed)
+    ld_prior = (
+        -0.5 * ((u1 - U1_LD) / 0.1) ** 2
+        - 0.5 * ((u2 - U2_LD) / 0.1) ** 2
+    )
+
+    '''
+    The intrinsic difference and the reason behind two different Gaussian Priors for limb darkenign and
+    GP Hyperparameters is the following:
+
+    The ld prior encodes actual physical knowledge from stellar atmosphere models
+
+    The gp_prior is more of a regularization term to keep the GP hyperparameters in a reasonable range, 
+    since we don't have strong prior knowledge about them. It's more of a "keep the GP from going crazy" 
+    prior, whereas the ld_prior is a "this is what we expect based on physics" prior.
+    
+    '''
 
     # --- Wide Gaussian prior on GP hyperparams ---
     gp_prior = -0.5 * np.sum((gp_params / 2.0) ** 2)
@@ -305,11 +344,171 @@ def log_prob(params, t, flux, ferr):
         flux_transit = transit_model(t, t0, per, rp, a, inc, u1, u2)
         residuals    = flux - flux_transit      # GP models the residuals, not the raw flux
         gp           = build_gp(gp_params, t, ferr)
-        return gp.log_likelihood(residuals) + gp_prior
+        return gp.log_likelihood(residuals) + gp_prior + ld_prior 
     except Exception:
         return -np.inf
     
 
 ### Initial params
 
+initial_transit = [
+    T0_in_data,   # t0 
+    PER_KNOWN,    
+    0.1,          # rp  — start at a roughly Jupiter size 
+    15.0,         # a   — rough guess, refine from Kepler's 3rd law
+    85.0,         # inc
+    U1_LD,        # u1  — initialise at ldtk value
+    U2_LD,        # u2  — initialise at ldtk value
+]
 
+# GP: [mean, log_sigma, log_period, log_Q0, log_dQ, log_f, log_jitter]
+initial_gp = [
+    0.0,                        # mean
+    np.log(1e-3),               # log_sigma
+    np.log(ROT_KNOWN),         # log_period — initialise at Lomb-Scargle period
+    np.log(1.0),                # log_Q0
+    np.log(0.5),                # log_dQ
+    np.log(0.5),                # log_f
+    np.log(1e-6),               # log_jitter
+]
+
+initial_params = initial_transit + initial_gp
+
+
+#### THIS PART IS VIBE CODED COMPLETELY:
+
+# -------------------------------------------------------
+# 7. OPTIMISE FIRST (good starting point for MCMC)
+# -------------------------------------------------------
+def neg_log_prob(params, t, flux, ferr):
+    lp = log_prob(params, t, flux, ferr)
+    return -lp if np.isfinite(lp) else 1e10
+
+print("Optimizing...")
+soln = minimize(
+    neg_log_prob,
+    initial_params,
+    args=(t_clean, flux_clean, ferr_clean),
+    method="L-BFGS-B"
+)
+print(f"Optimization success: {soln.success}")
+print(f"Best t0  = {soln.x[0]:.6f}")
+print(f"Best per = {soln.x[1]:.6f}")
+print(f"Best rp  = {soln.x[2]:.4f}")
+print(f"Best a   = {soln.x[3]:.3f}")
+print(f"Best inc = {soln.x[4]:.3f}")
+
+# Plot prediction at optimized params before MCMC
+best = soln.x
+flux_tr  = transit_model(t_clean, *best[:7])
+gp_opt   = build_gp(best[7:], t_clean, ferr_clean)
+mu, var  = gp_opt.predict(flux_clean - flux_tr, t=t_clean, return_var=True)
+
+fig, axes = plt.subplots(2, 1, figsize=(14, 8), sharex=True)
+axes[0].plot(t_clean, flux_clean, 'k.', ms=1, alpha=0.3, label='data')
+axes[0].plot(t_clean, flux_tr + mu, 'r-', lw=1, label='transit + GP')
+axes[0].fill_between(t_clean, flux_tr + mu - np.sqrt(var),
+                               flux_tr + mu + np.sqrt(var), color='r', alpha=0.2)
+axes[0].set_ylabel("Normalised Flux")
+axes[0].legend(fontsize=8)
+axes[1].plot(t_clean, flux_clean - flux_tr - mu, 'k.', ms=1, alpha=0.3)
+axes[1].axhline(0, color='r', lw=1)
+axes[1].set_ylabel("Residuals")
+axes[1].set_xlabel("Time (BTJD)")
+plt.tight_layout()
+plt.savefig("optimized_fit.png", dpi=300)
+plt.close()
+print("Saved: optimized_fit.png")
+
+
+# -------------------------------------------------------
+# 8. MCMC WITH EMCEE
+# -------------------------------------------------------
+ndim     = len(initial_params)
+nwalkers = 64
+
+# Start walkers in tiny ball around optimizer solution
+coords = soln.x + 1e-5 * np.random.randn(nwalkers, ndim)
+
+sampler = emcee.EnsembleSampler(
+    nwalkers, ndim, log_prob,
+    args=(t_clean, flux_clean, ferr_clean)
+)
+
+print("Running burn-in (2000 steps)...")
+state = sampler.run_mcmc(coords, 2000, progress=True)
+sampler.reset()
+
+print("Running production (5000 steps)...")
+sampler.run_mcmc(state, 5000, progress=True)
+
+# Convergence check
+try:
+    tau = sampler.get_autocorr_time(quiet=True)
+    print(f"Autocorrelation times: {np.round(tau, 1)}")
+    print(f"Effective samples: {5000 / tau}")
+except Exception:
+    print("Could not compute autocorrelation times — may need more steps")
+
+
+# -------------------------------------------------------
+# 9. RESULTS
+# -------------------------------------------------------
+flat_samples = sampler.get_chain(discard=500, thin=15, flat=True)
+
+labels = [
+    "t0", "per", "rp", "a", "inc", "u1", "u2",
+    "mean", "log_sigma", "log_period", "log_Q0", "log_dQ", "log_f", "log_jitter"
+]
+
+# Print median + 1sigma for transit params
+print("\n--- Transit Parameters ---")
+for i, label in enumerate(labels[:7]):
+    lo, mid, hi = np.percentile(flat_samples[:, i], [16, 50, 84])
+    print(f"  {label:5s} = {mid:.5f} + {hi-mid:.5f} - {mid-lo:.5f}")
+
+# Corner plot (transit params only — 7 params)
+fig = corner.corner(
+    flat_samples[:, :7],
+    labels=labels[:7],
+    quantiles=[0.16, 0.5, 0.84],
+    show_titles=True,
+    title_kwargs={"fontsize": 10}
+)
+fig.savefig("corner_transit.png", dpi=150)
+plt.close()
+print("Saved: corner_transit.png")
+
+
+# -------------------------------------------------------
+# 10. FINAL PLOT — posterior predictive
+# -------------------------------------------------------
+best_params  = np.median(flat_samples, axis=0)
+flux_transit = transit_model(t_clean, *best_params[:7])
+gp_final     = build_gp(best_params[7:], t_clean, ferr_clean)
+residuals    = flux_clean - flux_transit
+mu, var      = gp_final.predict(residuals, t=t_clean, return_var=True)
+
+fig, axes = plt.subplots(2, 1, figsize=(14, 8), sharex=True)
+
+axes[0].plot(t_clean, flux_clean, 'k.', ms=1, alpha=0.3, label='data')
+axes[0].plot(t_clean, flux_transit + mu, 'r-', lw=1.2, label='transit + GP (median posterior)')
+axes[0].fill_between(
+    t_clean,
+    flux_transit + mu - np.sqrt(var),
+    flux_transit + mu + np.sqrt(var),
+    color='r', alpha=0.2, label='1σ GP uncertainty'
+)
+axes[0].set_ylabel("Normalised Flux")
+axes[0].legend(fontsize=8)
+
+axes[1].plot(t_clean, flux_clean - flux_transit - mu, 'k.', ms=1, alpha=0.3)
+axes[1].axhline(0, color='r', lw=1)
+axes[1].set_ylabel("Residuals")
+axes[1].set_xlabel("Time (BTJD)")
+
+plt.tight_layout()
+plt.savefig("final_fit.png", dpi=300)
+plt.close()
+print("Saved: final_fit.png")
+print("Done.")
