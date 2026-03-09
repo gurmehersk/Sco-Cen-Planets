@@ -9,6 +9,8 @@ import emcee
 import corner
 import batman
 from ldtk import LDPSetCreator, BoxcarFilter
+import os 
+from multiprocessing import Pool
 
 ### Just a few notes: we will be sigma clipping flares before GP fitting,
 ### recall that flares are not Guassian!
