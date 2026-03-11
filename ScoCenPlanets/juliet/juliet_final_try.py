@@ -159,7 +159,7 @@ params = [
     'q2_TESS',       # limb darkening q2 (Kipping 2013)
     'ecc_p1',        # eccentricity — fixed circular
     'omega_p1',      # argument of periastron — fixed
-    'rho',           # stellar density (g/cm³) — juliet derives a/R* from this
+    'rho',           # stellar density (kg/m³) — juliet derives a/R* from this
     'mdilution_TESS',# dilution factor — fixed at 1 (no contamination)
     'mflux_TESS',    # flux offset
     'sigma_w_TESS',  # white noise jitter
@@ -252,7 +252,7 @@ print("="*60)
 params_to_report = {
     'P_p1':        'Period (days)',
     't0_p1':       'T0 (BTJD)',
-    'rho':         'Stellar density (g/cm³)',
+    'rho':         'Stellar density (kg/m³)',
     'GP_B_TESS':   'GP amplitude',
     'GP_C_TESS':   'GP harmonic complexity',
     'GP_L_TESS':   'GP decay timescale (days)',
@@ -339,7 +339,7 @@ print(f"Saved: 88297141_GP_QP_fit_v{run_number}.png")
 params_corner = ['P_p1', 't0_p1', 'p_p1', 'b_p1', 'rho',
                  'GP_B_TESS', 'GP_Prot_TESS']
 labels_corner = ['Period (d)', 'T0 (BTJD)', 'Rp/R*', 'b',
-                 'ρ* (g/cm³)', 'GP amp', 'GP Prot (d)']
+                 'ρ* (kg/m³)', 'GP amp', 'GP Prot (d)']
 
 samples_corner = np.array([posterior_samples[param]
                             for param in params_corner]).T
