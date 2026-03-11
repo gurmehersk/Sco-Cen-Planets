@@ -11,7 +11,7 @@ import corner
 # SETTINGS
 # -------------------------------------------------------
 number_of_cores = 24
-run_number      = 2
+run_number      = 3
 
 # -------------------------------------------------------
 # KNOWN STELLAR / ORBITAL PARAMS
@@ -270,18 +270,22 @@ for param, label in params_to_report.items():
 r1 = posterior_samples['r1_p1']
 r2 = posterior_samples['r2_p1']
 
-p_p1 = np.where(r2 < 0.5, r1, 1 - r1)
-b_p1 = np.where(r2 < 0.5, r2 * (1 + p_p1), (1 - r2) * (1 + p_p1))
+### correcting the impatc parameter and Rp/Rs parameters
+
+b, p_p1 = juliet.utils.reverse_bp(r1, r2, 0., 1.)
+
+p_med, p_hi, p_lo = juliet.utils.get_quantiles(p_p1)
+b_med, b_hi, b_lo = juliet.utils.get_quantiles(b)
+
+#p_p1 = np.where(r2 < 0.5, r1, 1 - r1)
+#b_p1 = np.where(r2 < 0.5, r2 * (1 + p_p1), (1 - r2) * (1 + p_p1))
 
 posterior_samples['p_p1'] = p_p1
-posterior_samples['b_p1'] = b_p1
+posterior_samples['b_p1'] = b
 
 print("\n--- Derived Parameters ---")
-for samps, label in zip([p_p1, b_p1], ['Rp/R*', 'Impact parameter b']):
-    med = np.median(samps)
-    lo  = np.percentile(samps, 16)
-    hi  = np.percentile(samps, 84)
-    print(f"  {label:35s}: {med:.6f} +{hi-med:.6f} -{med-lo:.6f}")
+print(f"  Rp/R*              : {p_med:.6f} +{p_hi-p_med:.6f} -{p_med-p_lo:.6f}")
+print(f"  Impact parameter b : {b_med:.6f} +{b_hi-b_med:.6f} -{b_med-b_lo:.6f}")
 
 print("="*60)
 
