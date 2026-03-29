@@ -7,11 +7,28 @@ from astropy.io import fits
 from matplotlib import gridspec
 import corner
 
+### 29th March 2026 
+#### REMINDERS FOR dynesty and nested sampling in general #### 
+
+### dlogz for robust statistical analysis -> 0.01
+### number of livepoints = 25-50 * N_dimensions, here our GP 
+### dimensions is about N_dimensions = 16. So number of live
+### points should be about 400-800. Our default setup is 500.
+### let's try and increase that while decreasing dlogz
+
+### Note : the above changes will drastically increase computation
+### time. Therefore, it is recommended to use lower live points and
+### a relatively high dlogz like 0.5 for exploratory runs!
+
+### actually, since our results seemed fine, let's not change
+### number of live points, since we were within the range, albeit
+### towards the lower end.
+
 # -------------------------------------------------------
 # SETTINGS
 # -------------------------------------------------------
 number_of_cores = 24
-run_number      = 3
+run_number      = 4
 
 # -------------------------------------------------------
 # KNOWN STELLAR / ORBITAL PARAMS
@@ -235,9 +252,14 @@ print(f"Fitting with dynesty using {number_of_cores} cores...")
 
 
 # -------------------------------------------------------
-# 6. FIT
+# 6. FIT 
 # -------------------------------------------------------
-results = dataset.fit(use_dynesty=True, dynesty_nthreads=number_of_cores)
+
+### For run number = 4, we are updating the dataset.fit for a more complex analysis.
+### we are going to make the dlogz threshold 0.01, instead of the "default" version which runs 
+# when add_live = True. For more info, import dynesty and type help(dynesty.NestedSampler.run_nested)
+
+results = dataset.fit(use_dynesty=True, dynesty_nthreads=number_of_cores, dlogz = 0.01)
 
 
 # -------------------------------------------------------
