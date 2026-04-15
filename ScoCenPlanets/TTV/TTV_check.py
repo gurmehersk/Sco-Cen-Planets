@@ -280,7 +280,7 @@ for win in transit_windows:
     f_win = win["flux"]
     e_win = win["flux_err"]
     N = win["N"]
-    t_pred = win["t_pred"]
+    t_pred = win["t_predicted"]
     # Initial guess for deterministic optimizer
     p0_poly = np.zeros(poly_order + 1)
     p0_poly[-1] = np.median(f_win)
