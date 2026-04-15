@@ -23,6 +23,13 @@ p   = 4.644695    # orbital period (days)
 t0  = 3803.239888 # transit centre (BTJD)
 duration = 0.155 # going a little over 3.5 hours to account for 0.1h error
 
+
+# MCMC settings
+nwalkers = 24
+nsteps = 2500
+nburn = 1000
+thin = 10
+
 # -------------------------------------------------------
 # FILE PATHS
 # -------------------------------------------------------
