@@ -15,6 +15,7 @@ from matplotlib import gridspec
 import corner
 import emcee 
 import batman 
+import os 
 
 # -------------------------------------------------------
 # orbital params from the previous GP fit,  
