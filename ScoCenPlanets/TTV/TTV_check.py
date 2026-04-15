@@ -278,7 +278,7 @@ t_pred_list = []
 for win in transit_windows:
     t_win = win["time"]
     f_win = win["flux"]
-    e_win = win["err"]
+    e_win = win["flux_err"]
     N = win["N"]
     t_pred = win["t_pred"]
     # Initial guess for deterministic optimizer
