@@ -13,7 +13,8 @@ import matplotlib.pyplot as plt
 from astropy.io import fits
 from matplotlib import gridspec
 import corner
-
+import emcee 
+import batman 
 
 # -------------------------------------------------------
 # orbital params from the previous GP fit,  
