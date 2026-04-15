@@ -372,7 +372,16 @@ srt = np.argsort(N_arr)
 N_arr = N_arr[srt]
 t_obs = t_obs[srt]
 sig_t = sig_t[srt]
+
 # Weighted linear ephemeris fit: t(N) = t_ref + P*N
+
+## this was a little confusing to me to think why we need to do this
+## essentially, if we had jsut subtracted the t_linear_predicted, i.e. the t_predicted
+## array that we had first calcualted, we would get this extra linear shift slope trend 
+## if the t0 was even slightly off. There would be this artifact caused by the minor 
+## offset/discrepancy in the value we set and what was calcualted. This concept is a
+## little nuanced and subtle so might want to read up on it more.abs
+
 A = np.vstack([np.ones_like(N_arr), N_arr]).T
 W = np.diag(1.0 / sig_t**2)
 cov_beta = np.linalg.inv(A.T @ W @ A)
@@ -383,7 +392,11 @@ sig_P = np.sqrt(cov_beta[1, 1])
 cov_tref_P = cov_beta[0, 1]
 t_calc = t_ref_fit + P_fit * N_arr
 oc_days = t_obs - t_calc
+
 # O-C uncertainty including ephemeris uncertainty
+### propagating the MCMC mid transit time uncertainties to the O-C uncertainties 
+
+
 oc_var = sig_t**2 + sig_tref**2 + (N_arr**2) * sig_P**2 + 2.0 * N_arr * cov_tref_P
 oc_var = np.where(oc_var > 0, oc_var, sig_t**2)
 oc_err_days = np.sqrt(oc_var)
