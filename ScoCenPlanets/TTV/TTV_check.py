@@ -32,6 +32,10 @@ nsteps = 2500
 nburn = 1000
 thin = 10
 
+# Output
+plot_dir = "transit_window_plots"
+os.makedirs(plot_dir, exist_ok=True)
+
 # -------------------------------------------------------
 # FILE PATHS
 # -------------------------------------------------------
