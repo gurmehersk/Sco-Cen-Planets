@@ -60,7 +60,7 @@ rot = 1.8099     # stellar rotation period from Lomb-Scargle (days)
 # -------------------------------------------------------
 LCPATH1 = "/home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2025099153000-s0091-0000000088297141-0288-s/tess2025099153000-s0091-0000000088297141-0288-s_lc.fits"
 LCPATH2 = "/home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2025127075000-s0092-0000000088297141-0289-s/tess2025127075000-s0092-0000000088297141-0289-s_lc.fits"
-LCPATH3 = "/home/gurmeher/Sco-Cen-Planets/ScoCenPlanets/SWOPE_data/swope_8829.xls.csv" 
+LCPATH3 = "/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/SWOPE_data/swope_8829.xls.csv" 
 # -------------------------------------------------------
 # 1. SIGMA CLIP FUNCTIONS (from WOTAN package)
 # -------------------------------------------------------
