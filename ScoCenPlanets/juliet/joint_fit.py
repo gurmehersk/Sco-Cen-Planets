@@ -23,6 +23,7 @@ import matplotlib.pyplot as plt
 from astropy.io import fits
 from matplotlib import gridspec
 import corner
+import pandas as pd
 
 ### 29th March 2026 
 #### REMINDERS FOR dynesty and nested sampling in general #### 
@@ -45,7 +46,7 @@ import corner
 # SETTINGS
 # -------------------------------------------------------
 number_of_cores = 24
-run_number      = 4
+run_number      = 5  # for file naming — increment for each run with different settings
 
 # -------------------------------------------------------
 # KNOWN STELLAR / ORBITAL PARAMS
@@ -59,8 +60,7 @@ rot = 1.8099     # stellar rotation period from Lomb-Scargle (days)
 # -------------------------------------------------------
 LCPATH1 = "/home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2025099153000-s0091-0000000088297141-0288-s/tess2025099153000-s0091-0000000088297141-0288-s_lc.fits"
 LCPATH2 = "/home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2025127075000-s0092-0000000088297141-0289-s/tess2025127075000-s0092-0000000088297141-0289-s_lc.fits"
-
-
+LCPATH3 = "/home/gurmeher/Sco-Cen-Planets/ScoCenPlanets/SWOPE_data/swope_8829.xls.csv" 
 # -------------------------------------------------------
 # 1. SIGMA CLIP FUNCTIONS (from WOTAN package)
 # -------------------------------------------------------
@@ -113,8 +113,23 @@ def load_tess_lc(lcpath):
     mask = np.isfinite(time) & np.isfinite(flux) & np.isfinite(ferr)
     return time[mask], flux[mask], ferr[mask]
 
+def load_swope_lc(lcpath):
+    df = pd.read_csv(lcpath)
+    unconverted_time = df['BJD_TDB'].values 
+    time = unconverted_time - 2457000.0  # Convert to BTJD
+    flux = df['rel_flux_T1'].values 
+    ferr = df['rel_flux_err_T1'].values
+    mask = np.isfinite(time) & np.isfinite(flux) & np.isfinite(ferr)
+    return time[mask], flux[mask], ferr[mask]
+
 t1, flux1, ferr1 = load_tess_lc(LCPATH1)
 t2, flux2, ferr2 = load_tess_lc(LCPATH2)
+
+### Adding SWOPE data
+t3, flux3, ferr3 = load_swope_lc(LCPATH3) 
+## note: this is alr normalized since its relative flux
+### nOW we dont just stitch this directly, we follow
+## juliet protocol
 
 # Normalise each sector by its own median
 flux1_norm = flux1 / np.nanmedian(flux1)
@@ -152,7 +167,10 @@ print(f"Points removed:         {len(t_full) - len(t_clean)}")
 
 
 # -------------------------------------------------------
-# 3. FOLD T0 INTO DATA WINDOW + IDENTIFY ALL TRANSITS
+# 3. FOLD T0 INTO DATA WINDOW + IDENTIFY ALL TRANSITS --> Its okay not to do this for SWOPE
+
+## we arent considered with the phase folded to include SWOPE, we only care about the 
+## recovered transit parameters which will have the SWOPE data included 
 # -------------------------------------------------------
 N_orbits   = np.round((t_full.mean() - t0) / p)
 T0_in_data = t0 + N_orbits * p
@@ -184,6 +202,36 @@ print(f"Number of transits in data: {len(all_T0s)}")
 # -------------------------------------------------------
 priors = {}
 
+
+###
+## [28th APril 2026]
+'''
+Lets learn some things
+
+We do not need a separate P, t0, r1, r2 for the swope data, since we are doing a joint fit. 
+The transit parameters are shared between the two datasets, and the SWOPE data will help constrain those 
+parameters better. These are therefore treated as "global" parameters in the juliet fit, meaning they are 
+the same for both datasets. The only parameters that are dataset-specific (ie, "local") are the dilution factor, 
+flux offset, and jitter, since these can differ between TESS and SWOPE due to different instruments and observational 
+conditions. These parametres are " instrument-level nuisance parameters" — they describe not the planet, 
+but the telescope and observing conditions.
+
+mdilution — how much the transit depth is diluted by contaminating flux in the aperture (nearby stars etc.). 
+Fixed at 1.0 for both here since you're assuming no contamination
+
+mflux — a constant additive offset to put the out-of-transit baseline exactly at zero. Every instrument 
+will have its own normalisation quirks, so each needs its own offset
+
+sigma_w — extra white noise jitter on top of your formal error bars. Accounts for any underestimated errors or 
+correlated noise that isn't captured by ferr.  TESS and SWOPE have completely different detectors and noise floors 
+so these are completely independent.
+
+Note, we do not add any GP params for SWOPE since the data is too short and at the same time
+noisy to have any major stellar variability. Even if we did, it would just fit as linear, which
+is probably something sigma_w can also fit as jitter, and mflux as offset.
+
+WE might add it if the fit doesnt match our expectations.
+'''
 params = [
     'P_p1',          # orbital period
     't0_p1',         # transit centre
@@ -201,6 +249,13 @@ params = [
     'GP_C_TESS',     # QP kernel harmonic complexity
     'GP_L_TESS',     # QP kernel decay timescale
     'GP_Prot_TESS',  # QP kernel rotation period
+
+    ## add swope params
+    'mdilution_SWOPE',
+    'mflux_SWOPE',
+    'sigma_w_SWOPE',
+    'q1_SWOPE',
+    'q2_SWOPE',
 ]
 
 dists = [
@@ -220,6 +275,13 @@ dists = [
     'uniform',       # GP_C_TESS
     'loguniform',    # GP_L_TESS
     'normal',        # GP_Prot_TESS
+
+    ## SWOPE adds
+    'fixed',         # mdilution_SWOPE
+    'normal',        # mflux_SWOPE
+    'loguniform',    # sigma_w_SWOPE
+    'uniform',       # q1_SWOPE
+    'uniform',       # q2_SWOPE
 ]
 
 hyperps = [
@@ -239,6 +301,13 @@ hyperps = [
     [0.0,  1.0],         # GP_C_TESS — harmonic complexity
     [0.5,  100.],        # GP_L_TESS — decay timescale
     [rot, 0.5],          # GP_Prot_TESS — Gaussian prior on known rotation period
+
+    #SWOPE ADDITIONS
+    1.0,                 # mdilution_SWOPE
+    [0., 0.1],           # mflux_SWOPE
+    [0.1, 10000.],        # sigma_w_SWOPE --> let's increase the upper bound for jitter by 10 since SWOPE _is_ noisy 
+    [0., 1.],            # q1_SWOPE
+    [0., 1.],            # q2_SWOPE
 ]
 
 # Populate priors dictionary in juliet format
@@ -251,17 +320,17 @@ for param, dist, hyperp in zip(params, dists, hyperps):
 # -------------------------------------------------------
 # 5. LOAD DATASET INTO JULIET
 # -------------------------------------------------------
-times        = {'TESS': t_clean}
-fluxes       = {'TESS': flux_clean}
-fluxes_error = {'TESS': ferr_clean}
+times        = {'TESS': t_clean, 'SWOPE': t3}
+fluxes       = {'TESS': flux_clean, 'SWOPE': flux3}
+fluxes_error = {'TESS': ferr_clean, 'SWOPE': ferr3}
 
 dataset = juliet.load(
     priors         = priors,
     t_lc           = times,
     y_lc           = fluxes,
     yerr_lc        = fluxes_error,
-    GP_regressors_lc = times,
-    out_folder     = f'88297141_GP_QP_v{run_number}',
+    GP_regressors_lc = {'TESS': t_clean}, # GP regressor only for TESS, NOT for SWOPE.. reasoning explained above 
+    out_folder     = f'88297141_GP_QP_joint_v{run_number}',
     verbose        = True
 )
 
@@ -373,9 +442,9 @@ ax2.grid(alpha=0.3)
 ax2.set_title('Phase-folded transit')
 
 plt.tight_layout()
-plt.savefig(f'88297141_GP_QP_fit_v{run_number}.png', dpi=300, bbox_inches='tight')
+plt.savefig(f'88297141_GP_QP_fit_joint_v{run_number}.png', dpi=300, bbox_inches='tight')
 plt.close()
-print(f"Saved: 88297141_GP_QP_fit_v{run_number}.png")
+print(f"Saved: 88297141_GP_QP_fit_joint_v{run_number}.png")
 
 # --- Plot 3: corner plot ---
 params_corner = ['P_p1', 't0_p1', 'p_p1', 'b_p1', 'rho',
@@ -394,7 +463,7 @@ fig_corner = corner.corner(
     title_kwargs={"fontsize": 10},
     label_kwargs={"fontsize": 12}
 )
-fig_corner.savefig(f'88297141_corner_v{run_number}.png', dpi=300, bbox_inches='tight')
+fig_corner.savefig(f'88297141_corner_joint_v{run_number}.png', dpi=300, bbox_inches='tight')
 plt.close()
-print(f"Saved: 88297141_corner_v{run_number}.png")
+print(f"Saved: 88297141_corner_joint_v{run_number}.png")
 print("Done.")
