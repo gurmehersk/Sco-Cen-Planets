@@ -46,7 +46,7 @@ import pandas as pd
 # SETTINGS
 # -------------------------------------------------------
 number_of_cores = 24
-run_number      = 5  # for file naming — increment for each run with different settings
+run_number      = 6  # for file naming — increment for each run with different settings
 
 # -------------------------------------------------------
 # KNOWN STELLAR / ORBITAL PARAMS
@@ -273,8 +273,9 @@ params = [
 dists = [
     'normal',        # P_p1
     'normal',        # t0_p1
-    'uniform',       # r1_p1
-    'uniform',       # r2_p1
+    'normal',       # r1_p1 --> changing this and r2 for the joint fit as TESS gave us good constraints on these 
+     # params, letting them roam free is a little detrimental to the fit
+    'normal',       # r2_p1
     'uniform',       # q1_TESS
     'uniform',       # q2_TESS
     'fixed',         # ecc_p1
@@ -299,8 +300,8 @@ dists = [
 hyperps = [
     [p, 0.01],           # P_p1 — tight Gaussian on known period
     [T0_in_data, 0.1],   # t0_p1 — tight Gaussian on folded T0
-    [0., 1.],            # r1_p1
-    [0., 1.],            # r2_p1
+    [0.538, 0.2],            # r1_p1
+    [0.093, 0.01],            # r2_p1
     [0., 1.],            # q1_TESS
     [0., 1.],            # q2_TESS
     0.0,                 # ecc_p1
