@@ -120,6 +120,10 @@ def load_swope_lc(lcpath):
     flux = df['rel_flux_T1'].values 
     ferr = df['rel_flux_err_T1'].values
     mask = np.isfinite(time) & np.isfinite(flux) & np.isfinite(ferr)
+    ## normalize
+    flux = flux / np.nanmedian(flux)
+    ferr = ferr / np.nanmedian(flux)
+    
     return time[mask], flux[mask], ferr[mask]
 
 t1, flux1, ferr1 = load_tess_lc(LCPATH1)
@@ -127,7 +131,7 @@ t2, flux2, ferr2 = load_tess_lc(LCPATH2)
 
 ### Adding SWOPE data
 t3, flux3, ferr3 = load_swope_lc(LCPATH3) 
-## note: this is alr normalized since its relative flux
+## note: this is alr normalized inside the load_swope_lc function
 ### nOW we dont just stitch this directly, we follow
 ## juliet protocol
 
@@ -183,6 +187,14 @@ print(f"Data runs from {t_full.min():.2f} to {t_full.max():.2f} BTJD")
 print(f"T0 folded into data window: {T0_in_data:.6f} BTJD")
 print(f"Number of transits in data: {len(all_T0s)}")
 
+print("SWOPE time range:", t3.min(), t3.max())
+print("SWOPE flux range:", flux3.min(), flux3.max())
+print("SWOPE ferr range:", ferr3.min(), ferr3.max())
+print("Any NaN in t3:", np.any(np.isnan(t3)))
+print("Any NaN in flux3:", np.any(np.isnan(flux3)))
+print("Any NaN in ferr3:", np.any(np.isnan(ferr3)))
+print("Any zero/negative errors:", np.any(ferr3 <= 0))
+print("Number of SWOPE points:", len(t3))
 
 # -------------------------------------------------------
 # 4. JULIET PRIORS
