@@ -345,8 +345,7 @@ print(f"Fitting with dynesty using {number_of_cores} cores...")
 ### we are going to make the dlogz threshold 0.01, instead of the "default" version which runs 
 # when add_live = True. For more info, import dynesty and type help(dynesty.NestedSampler.run_nested)
 
-results = dataset.fit(use_dynesty=True, dynesty_nthreads=number_of_cores, dlogz = 0.01, n_live_points = 1000)
-
+results = dataset.fit(use_dynesty=True, dynesty_nthreads=number_of_cores, dlogz = 0.509)
 # -------------------------------------------------------
 # 7. RESULTS
 # -------------------------------------------------------
