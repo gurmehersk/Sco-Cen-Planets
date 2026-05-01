@@ -46,8 +46,8 @@ import pandas as pd
 # SETTINGS
 # -------------------------------------------------------
 number_of_cores = 24
-run_number      = 6  # for file naming — increment for each run with different settings
-
+run_number      = 7  # for file naming — increment for each run with different settings
+## run 7, i try impact parameter and planet size as priors 
 # -------------------------------------------------------
 # KNOWN STELLAR / ORBITAL PARAMS
 # -------------------------------------------------------
@@ -247,8 +247,8 @@ WE might add it if the fit doesnt match our expectations.
 params = [
     'P_p1',          # orbital period
     't0_p1',         # transit centre
-    'r1_p1',         # Espinoza (2018) radius/impact param 1
-    'r2_p1',         # Espinoza (2018) radius/impact param 2
+    'p_p1',         # depth 
+    'b_p1',         # impact parameter 
     'q1_TESS',       # limb darkening q1 (Kipping 2013)
     'q2_TESS',       # limb darkening q2 (Kipping 2013)
     'ecc_p1',        # eccentricity — fixed circular
@@ -273,9 +273,8 @@ params = [
 dists = [
     'normal',        # P_p1
     'normal',        # t0_p1
-    'normal',       # r1_p1 --> changing this and r2 for the joint fit as TESS gave us good constraints on these 
-     # params, letting them roam free is a little detrimental to the fit
-    'normal',       # r2_p1
+    'normal',       # p_p1 
+    'uniform',       # b_p1
     'uniform',       # q1_TESS
     'uniform',       # q2_TESS
     'fixed',         # ecc_p1
@@ -297,11 +296,13 @@ dists = [
     'uniform',       # q2_SWOPE
 ]
 
+### on juliet, cannot separate the b and size priors for swope and tess cuz theyre fitted as global parameters 
+### Change the prior stuff to impact parameter and Rp/Rs parameter...
 hyperps = [
     [p, 0.01],           # P_p1 — tight Gaussian on known period
     [T0_in_data, 0.1],   # t0_p1 — tight Gaussian on folded T0
-    [0.538, 0.2],            # r1_p1
-    [0.093, 0.01],            # r2_p1
+    [0.0935, 0.005],            # p_p1
+    [0., 1],            # b_p1
     [0., 1.],            # q1_TESS
     [0., 1.],            # q2_TESS
     0.0,                 # ecc_p1
@@ -371,6 +372,9 @@ print("="*60)
 params_to_report = {
     'P_p1':        'Period (days)',
     't0_p1':       'T0 (BTJD)',
+    ## adding
+    'p_p1':        'Rp/R*',
+    'b_p1':        'Impact parameter',
     'rho':         'Stellar density (kg/m³)',
     'GP_B_TESS':   'GP amplitude',
     'GP_C_TESS':   'GP harmonic complexity',
@@ -385,6 +389,8 @@ for param, label in params_to_report.items():
     hi   = np.percentile(posterior_samples[param], 84)
     print(f"  {label:35s}: {med:.6f} +{hi-med:.6f} -{med-lo:.6f}")
 
+
+'''
 # Derive p (Rp/R*) and b (impact parameter) from Espinoza r1, r2
 r1 = posterior_samples['r1_p1']
 r2 = posterior_samples['r2_p1']
@@ -405,7 +411,7 @@ posterior_samples['b_p1'] = b
 print("\n--- Derived Parameters ---")
 print(f"  Rp/R*              : {p_med:.6f} +{p_hi-p_med:.6f} -{p_med-p_lo:.6f}")
 print(f"  Impact parameter b : {b_med:.6f} +{b_hi-b_med:.6f} -{b_med-b_lo:.6f}")
-
+'''
 print("="*60)
 
 
@@ -416,11 +422,32 @@ print("="*60)
 transit_plus_gp = results.lc.evaluate('TESS')
 transit_model   = results.lc.model['TESS']['deterministic']
 gp_model        = results.lc.model['TESS']['GP']
+gp_corrected    = dataset.data_lc['TESS'] - gp_model
 
 # Compute phases using best-fit period and t0
 p_best  = np.median(posterior_samples['P_p1'])
 t0_best = np.median(posterior_samples['t0_p1'])
 phases  = juliet.utils.get_phases(dataset.times_lc['TESS'], p_best, t0_best)
+
+
+### adding phase bins 
+# Bin GP-corrected data in phase — 20 minute bins
+bin_width   = 20. / (p_best * 24. * 60.)
+bin_edges   = np.arange(-0.05, 0.05 + bin_width, bin_width)
+bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+
+bin_flux = np.zeros(len(bin_centers))
+bin_err  = np.zeros(len(bin_centers))
+bin_mask = np.zeros(len(bin_centers), dtype=bool)
+
+for i, (lo, hi) in enumerate(zip(bin_edges[:-1], bin_edges[1:])):
+    in_bin = (phases >= lo) & (phases < hi)
+    if in_bin.sum() > 0:
+        w            = 1. / dataset.errors_lc['TESS'][in_bin]**2
+        bin_flux[i]  = np.average(gp_corrected[in_bin], weights=w)
+        bin_err[i]   = 1. / np.sqrt(np.sum(w))
+        bin_mask[i]  = True
+
 
 # --- Plot 1: full light curve + model ---
 fig = plt.figure(figsize=(14, 5))
@@ -437,7 +464,43 @@ ax1.legend(fontsize=8)
 ax1.grid(alpha=0.3)
 ax1.set_title('Full light curve')
 
-# --- Plot 2: phase-folded, GP subtracted ---
+# --- Plot 2: phase-folded w/binned points ---
+ax2 = plt.subplot(gs[1])
+
+# Unbinned — background
+ax2.errorbar(phases, gp_corrected,
+             yerr=dataset.errors_lc['TESS'],
+             fmt='.', color='steelblue', alpha=0.15,
+             ms=2, elinewidth=0.5, zorder=1,
+             label='GP-corrected data')
+
+# Model — behind binned points
+ax2.plot(phases[idx_sort], transit_model[idx_sort],
+         color='black', lw=2, zorder=2, label='Transit model')
+
+
+# Binned points — front
+ax2.errorbar(bin_centers[bin_mask], bin_flux[bin_mask],
+             yerr=bin_err[bin_mask],
+             fmt='o', color='navy', ms=5,
+             elinewidth=1.5, capsize=2, zorder=3,
+             label='20-min bins')
+
+ax2.set_xlabel('Phase', fontsize=12)
+ax2.set_ylabel('Relative flux', fontsize=12)
+ax2.set_xlim([-0.05, 0.05])
+ax2.set_ylim([0.975, 1.015])
+ax2.legend(fontsize=8)
+ax2.grid(alpha=0.3)
+ax2.set_title('Phase-folded transit')
+
+plt.tight_layout()
+plt.savefig(f'88297141_GP_QP_fit_joint_v{run_number}.png', dpi=300, bbox_inches='tight')
+plt.close()
+print(f"Saved: 88297141_GP_QP_fit_joint_v{run_number}.png")
+
+'''
+
 ax2 = plt.subplot(gs[1])
 idx_sort = np.argsort(phases)
 
@@ -457,6 +520,16 @@ plt.tight_layout()
 plt.savefig(f'88297141_GP_QP_fit_joint_v{run_number}.png', dpi=300, bbox_inches='tight')
 plt.close()
 print(f"Saved: 88297141_GP_QP_fit_joint_v{run_number}.png")
+'''
+
+
+
+
+
+
+
+
+
 
 # --- Plot 3: corner plot ---
 params_corner = ['P_p1', 't0_p1', 'p_p1', 'b_p1', 'rho',
