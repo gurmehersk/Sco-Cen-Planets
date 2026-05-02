@@ -1,3 +1,9 @@
+'''
+CORRECT WORKING CODE FOR GPR USING Quasi Periodic KERNEL
+'''
+
+
+
 import juliet
 import numpy as np
 import matplotlib
@@ -28,7 +34,7 @@ import corner
 # SETTINGS
 # -------------------------------------------------------
 number_of_cores = 24
-run_number      = 4
+run_number      = 9
 
 # -------------------------------------------------------
 # KNOWN STELLAR / ORBITAL PARAMS
@@ -149,6 +155,8 @@ print(f"T0 folded into data window: {T0_in_data:.6f} BTJD")
 print(f"Number of transits in data: {len(all_T0s)}")
 
 
+
+
 # -------------------------------------------------------
 # 4. JULIET PRIORS
 #
@@ -170,8 +178,8 @@ priors = {}
 params = [
     'P_p1',          # orbital period
     't0_p1',         # transit centre
-    'r1_p1',         # Espinoza (2018) radius/impact param 1
-    'r2_p1',         # Espinoza (2018) radius/impact param 2
+    'p_p1',         # Espinoza (2018) radius/impact param 1
+    'b_p1',         # Espinoza (2018) radius/impact param 2
     'q1_TESS',       # limb darkening q1 (Kipping 2013)
     'q2_TESS',       # limb darkening q2 (Kipping 2013)
     'ecc_p1',        # eccentricity — fixed circular
@@ -189,8 +197,8 @@ params = [
 dists = [
     'normal',        # P_p1
     'normal',        # t0_p1
-    'uniform',       # r1_p1
-    'uniform',       # r2_p1
+    'normal',       # p_p1
+    'uniform',       # b_p1
     'uniform',       # q1_TESS
     'uniform',       # q2_TESS
     'fixed',         # ecc_p1
@@ -208,8 +216,8 @@ dists = [
 hyperps = [
     [p, 0.01],           # P_p1 — tight Gaussian on known period
     [T0_in_data, 0.1],   # t0_p1 — tight Gaussian on folded T0
-    [0., 1.],            # r1_p1
-    [0., 1.],            # r2_p1
+    [0.0935, 0.005],            # p_p1
+    [0., 1.],            # b_p1
     [0., 1.],            # q1_TESS
     [0., 1.],            # q2_TESS
     0.0,                 # ecc_p1
@@ -261,7 +269,6 @@ print(f"Fitting with dynesty using {number_of_cores} cores...")
 
 results = dataset.fit(use_dynesty=True, dynesty_nthreads=number_of_cores, dlogz = 0.01)
 
-
 # -------------------------------------------------------
 # 7. RESULTS
 # -------------------------------------------------------
@@ -275,6 +282,8 @@ params_to_report = {
     'P_p1':        'Period (days)',
     't0_p1':       'T0 (BTJD)',
     'rho':         'Stellar density (kg/m³)',
+    'b_p1':       'Impact parameter',
+    'p_p1':       'Rp/R*',
     'GP_B_TESS':   'GP amplitude',
     'GP_C_TESS':   'GP harmonic complexity',
     'GP_L_TESS':   'GP decay timescale (days)',
@@ -287,7 +296,7 @@ for param, label in params_to_report.items():
     lo   = np.percentile(posterior_samples[param], 16)
     hi   = np.percentile(posterior_samples[param], 84)
     print(f"  {label:35s}: {med:.6f} +{hi-med:.6f} -{med-lo:.6f}")
-
+'''
 # Derive p (Rp/R*) and b (impact parameter) from Espinoza r1, r2
 r1 = posterior_samples['r1_p1']
 r2 = posterior_samples['r2_p1']
@@ -308,7 +317,7 @@ posterior_samples['b_p1'] = b
 print("\n--- Derived Parameters ---")
 print(f"  Rp/R*              : {p_med:.6f} +{p_hi-p_med:.6f} -{p_med-p_lo:.6f}")
 print(f"  Impact parameter b : {b_med:.6f} +{b_hi-b_med:.6f} -{b_med-b_lo:.6f}")
-
+'''
 print("="*60)
 
 
