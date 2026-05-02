@@ -46,7 +46,7 @@ import pandas as pd
 # SETTINGS
 # -------------------------------------------------------
 number_of_cores = 24
-run_number      = 7  # for file naming — increment for each run with different settings
+run_number      = 9  # for file naming — increment for each run with different settings
 ## run 7, i try impact parameter and planet size as priors 
 # -------------------------------------------------------
 # KNOWN STELLAR / ORBITAL PARAMS
@@ -268,6 +268,8 @@ params = [
     'sigma_w_SWOPE',
     'q1_SWOPE',
     'q2_SWOPE',
+
+
 ]
 
 dists = [
@@ -294,6 +296,7 @@ dists = [
     'loguniform',    # sigma_w_SWOPE
     'uniform',       # q1_SWOPE
     'uniform',       # q2_SWOPE
+
 ]
 
 ### on juliet, cannot separate the b and size priors for swope and tess cuz theyre fitted as global parameters 
@@ -322,6 +325,7 @@ hyperps = [
     [0.1, 10000.],        # sigma_w_SWOPE --> let's increase the upper bound for jitter by 10 since SWOPE _is_ noisy 
     [0., 1.],            # q1_SWOPE
     [0., 1.],            # q2_SWOPE
+
 ]
 
 # Populate priors dictionary in juliet format
@@ -466,7 +470,7 @@ ax1.set_title('Full light curve')
 
 # --- Plot 2: phase-folded w/binned points ---
 ax2 = plt.subplot(gs[1])
-
+idx_sort = np.argsort(phases)
 # Unbinned — background
 ax2.errorbar(phases, gp_corrected,
              yerr=dataset.errors_lc['TESS'],
