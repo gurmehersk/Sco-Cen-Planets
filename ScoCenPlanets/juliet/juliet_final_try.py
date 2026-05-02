@@ -34,7 +34,7 @@ import corner
 # SETTINGS
 # -------------------------------------------------------
 number_of_cores = 24
-run_number      = 9
+run_number      = 10
 
 # -------------------------------------------------------
 # KNOWN STELLAR / ORBITAL PARAMS
