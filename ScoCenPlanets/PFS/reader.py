@@ -79,7 +79,8 @@ across the data, computing a local weighted average of neighbors at each positio
 The Gaussian kernel is essentially the same idea as a weighted rolling window used 
 in the wotan detrending that we did for our original pipeline.
 
-smoothening kernel is 2 pixels wide
+smoothening kernel is 2 pixels wide. the higher the pixel number in the gaussian width,
+the more hard the smoothening, think of it like the window length in wotan. 
 '''
 from scipy.ndimage import gaussian_filter1d
 flux_smooth = gaussian_filter1d(fm, sigma=2)
