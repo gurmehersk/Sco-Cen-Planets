@@ -11,10 +11,13 @@ jointly with the TESS data. The hope is we get a better constraint on
 period and t0, and maybe even the transit shape parameters. The SWOPE data is
 quite noisy since visibility was not the best, but we will try to make the best
 of what we can.
+
+UPDATE: 1st June: We now have an additional transit from SSO, that we will try and fit
+This is a full transit... not partial. Good viewing as well..
 '''
 
 
-
+from astropy.table import Table
 import juliet
 import numpy as np
 import matplotlib
@@ -46,7 +49,7 @@ import pandas as pd
 # SETTINGS
 # -------------------------------------------------------
 number_of_cores = 24
-run_number      = 9  # for file naming — increment for each run with different settings
+run_number      = 1  # for file naming — increment for each run with different settings
 ## run 7, i try impact parameter and planet size as priors 
 # -------------------------------------------------------
 # KNOWN STELLAR / ORBITAL PARAMS
@@ -61,6 +64,7 @@ rot = 1.8099     # stellar rotation period from Lomb-Scargle (days)
 LCPATH1 = "/home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2025099153000-s0091-0000000088297141-0288-s/tess2025099153000-s0091-0000000088297141-0288-s_lc.fits"
 LCPATH2 = "/home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2025127075000-s0092-0000000088297141-0289-s/tess2025127075000-s0092-0000000088297141-0289-s_lc.fits"
 LCPATH3 = "/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/SWOPE_data/swope_8829.xls.csv" 
+LCPATH4 = "/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/SSO_data/TIC_88297141-22_20260425_LCO-SSO-1.0m_ip_5pix_measurements.tbl"
 # -------------------------------------------------------
 # 1. SIGMA CLIP FUNCTIONS (from WOTAN package)
 # -------------------------------------------------------
@@ -126,6 +130,18 @@ def load_swope_lc(lcpath):
 
     return time[mask], flux[mask], ferr[mask]
 
+def load_SSO_lc(lcpath):
+    t = Table.read(LCPATH4,format="ascii")
+    unconverted_time = t['BJD_TDB'].data
+    time = unconverted_time - 2457000.0 # convert to BTJD
+    flux = t['rel_flux_T1'].data
+    ferr = t['rel_flux_err_T1'].data
+    mask = np.isfinite(time) & np.isfinite(flux) & np.isfinite(ferr)
+    flux = flux / np.nanmedian(flux)
+    ferr = ferr / np.nanmedian(flux)
+
+    return time[mask], flux[mask], ferr[mask]
+
 t1, flux1, ferr1 = load_tess_lc(LCPATH1)
 t2, flux2, ferr2 = load_tess_lc(LCPATH2)
 
@@ -134,6 +150,9 @@ t3, flux3, ferr3 = load_swope_lc(LCPATH3)
 ## note: this is alr normalized inside the load_swope_lc function
 ### nOW we dont just stitch this directly, we follow
 ## juliet protocol
+
+## Adding SSO data
+t4, flux4, ferr4 = load_SSO_lc(LCPATH4)
 
 # Normalise each sector by its own median
 flux1_norm = flux1 / np.nanmedian(flux1)
@@ -173,8 +192,8 @@ print(f"Points removed:         {len(t_full) - len(t_clean)}")
 # -------------------------------------------------------
 # 3. FOLD T0 INTO DATA WINDOW + IDENTIFY ALL TRANSITS --> Its okay not to do this for SWOPE
 
-## we arent considered with the phase folded to include SWOPE, we only care about the 
-## recovered transit parameters which will have the SWOPE data included 
+## we arent considered with the phase folded to include SWOPE & SSO, we only care about the 
+## recovered transit parameters which will have the SWOPE & SSO data included 
 # -------------------------------------------------------
 N_orbits   = np.round((t_full.mean() - t0) / p)
 T0_in_data = t0 + N_orbits * p
@@ -220,8 +239,8 @@ priors = {}
 '''
 Lets learn some things
 
-We do not need a separate P, t0, r1, r2 for the swope data, since we are doing a joint fit. 
-The transit parameters are shared between the two datasets, and the SWOPE data will help constrain those 
+We do not need a separate P, t0, r1, r2 for the swope and SSO data, since we are doing a joint fit. 
+The transit parameters are shared between the two datasets, and the SWOPE & SSO data will help constrain those 
 parameters better. These are therefore treated as "global" parameters in the juliet fit, meaning they are 
 the same for both datasets. The only parameters that are dataset-specific (ie, "local") are the dilution factor, 
 flux offset, and jitter, since these can differ between TESS and SWOPE due to different instruments and observational 
@@ -243,6 +262,9 @@ noisy to have any major stellar variability. Even if we did, it would just fit a
 is probably something sigma_w can also fit as jitter, and mflux as offset.
 
 WE might add it if the fit doesnt match our expectations.
+
+FOR SSO, the run we are going to embark on rn [1st June], I will not be adding stellar variability to the fit,
+cuz again, my theory is it can be fit by the offset since it might just be linear...
 '''
 params = [
     'P_p1',          # orbital period
@@ -269,6 +291,12 @@ params = [
     'q1_SWOPE',
     'q2_SWOPE',
 
+    # add SSO params
+    'mdilution_SSO',
+    'mflux_SSO',
+    'sigma_w_SSO',
+    'q1_SSO',
+    'q2_SSO'
 
 ]
 
@@ -291,6 +319,13 @@ dists = [
     'normal',        # GP_Prot_TESS
 
     ## SWOPE adds
+    'fixed',         # mdilution_SWOPE
+    'normal',        # mflux_SWOPE
+    'loguniform',    # sigma_w_SWOPE
+    'uniform',       # q1_SWOPE
+    'uniform',       # q2_SWOPE
+
+    ## SSO adds
     'fixed',         # mdilution_SWOPE
     'normal',        # mflux_SWOPE
     'loguniform',    # sigma_w_SWOPE
@@ -326,6 +361,13 @@ hyperps = [
     [0., 1.],            # q1_SWOPE
     [0., 1.],            # q2_SWOPE
 
+    # SSO additions
+    1.0,                 # mdilution_SSO
+    [0., 0.1],           # mflux_SSO
+    [0.1, 1000.],        # sigma_w_SSO --> we will keep this the same as TESS.. since SSO isnt as noisy as SWOPE, and a full transit
+    [0., 1.],            # q1_SSO
+    [0., 1.],            # q2_SSO  
+
 ]
 
 # Populate priors dictionary in juliet format
@@ -338,9 +380,9 @@ for param, dist, hyperp in zip(params, dists, hyperps):
 # -------------------------------------------------------
 # 5. LOAD DATASET INTO JULIET
 # -------------------------------------------------------
-times        = {'TESS': t_clean, 'SWOPE': t3}
-fluxes       = {'TESS': flux_clean, 'SWOPE': flux3}
-fluxes_error = {'TESS': ferr_clean, 'SWOPE': ferr3}
+times        = {'TESS': t_clean, 'SWOPE': t3, 'SSO': t4}
+fluxes       = {'TESS': flux_clean, 'SWOPE': flux3, 'SSO': flux4}
+fluxes_error = {'TESS': ferr_clean, 'SWOPE': ferr3, 'SSO': ferr4}
 
 dataset = juliet.load(
     priors         = priors,
@@ -348,7 +390,7 @@ dataset = juliet.load(
     y_lc           = fluxes,
     yerr_lc        = fluxes_error,
     GP_regressors_lc = {'TESS': t_clean}, # GP regressor only for TESS, NOT for SWOPE.. reasoning explained above 
-    out_folder     = f'88297141_GP_QP_joint_v{run_number}',
+    out_folder     = f'88297141_GP_QP_joint_SSO_SWOPE_v{run_number}',
     verbose        = True
 )
 
