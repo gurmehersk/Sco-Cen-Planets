@@ -128,10 +128,27 @@ li_mask = (wm > 6700) & (wm < 6720)
 wm_li = wm[li_mask]
 fm_li = fm[li_mask]
 
-# build spectrum1D on trimmed region --> same as cdips code
+# build spectrum1D on trimmed region --> same as cdips code, see line 2076
 spec = Spectrum1D(spectral_axis=wm_li*u.AA, flux=fm_li*u.dimensionless_unscaled)
 
+'''
 
+Spectrum1D is essentially a container that holds your wavelength and flux arrays together as a single object, but with a lot of extra intelligence built in.
+When you just have raw numpy arrays like wm_li and fm_li, they're just numbers — numpy has no idea that one represents wavelengths and the other represents flux, 
+or that they're physically linked to each other. If you slice one, you have to remember to slice the other. If you do arithmetic, you have to handle units yourself.
+
+Spectrum1D solves all of that by:
+Keeping wavelength and flux permanently linked — when specutils does any operation on the spectrum, it always knows which flux value corresponds to which wavelength. They can't get out of sync.
+Enforcing physical units — by attaching u.AA and u.dimensionless_unscaled, you're telling the object what the numbers actually mean physically. This lets specutils do unit-aware operations — for 
+example when it computes EW it knows the result should come out in Angstroms because the spectral axis is in Angstroms.
+
+'''
+
+
+'''
+Defines wavelength intervals to ignore during the continuum fit. SpectralRegion is just specutils' way of saying "this chunk of spectrum".
+ We exclude the Li dip and Ca line so the continuum fit only sees the true background.
+'''
 exclude_regions = [
     SpectralRegion(6707*u.AA, 6712*u.AA),  
     SpectralRegion(6716*u.AA, 6720*u.AA),  
@@ -139,6 +156,10 @@ exclude_regions = [
 
 # fit continuum
 continuum = fit_generic_continuum(spec, exclude_regions=exclude_regions)(spec.spectral_axis)
+# This is two things happening on one line. fit_generic_continuum(spec, exclude_regions=exclude_regions) fits a 
+# polynomial to the spectrum avoiding the excluded regions and returns a model object (not the values yet). 
+# Then calling that model with (spec.spectral_axis) evaluates it at every wavelength point, 
+# giving you the actual continuum flux values as an array
 
 # normalize
 cont_norm_spec = spec / continuum
@@ -163,23 +184,32 @@ plt.savefig("checker.png")
 from astropy.modeling import models, fitting
 
 # flip so absorption becomes emission peak
+# Creates a new spectrum where the flux is 1 - normalised_flux. This flips the absorption dip (which goes downward from 1) into an emission peak 
+# (which goes upward from 0). We do this because the Gaussian model describes a peak, not a dip — it's easier to fit a bump w/ a gaussian than a depression.
+
 full_spec = Spectrum1D(
     spectral_axis=cont_norm_spec.spectral_axis,
     flux=(1 - cont_norm_spec.flux)
 )
 
-# define the region to fit over (±1Å around our empirical li_center)
+# Defines the fitting window +/- 1 Angstrom around the empirical Li center. 
+# The Gaussian fit will only use data within this window, ignoring everything outside it. This prevents nearby Fe lines from confusing the fit.
 region = SpectralRegion((li_center - 1.0)*u.AA, (li_center + 1.0)*u.AA)
 
-# initial guess for the Gaussian
+
 g_init = models.Gaussian1D(
     amplitude=0.5*u.dimensionless_unscaled,
     mean=li_center*u.AA,
     stddev=0.5*u.AA
 )
+# this sets up the initial guess for the Gaussian. 
+# amplitude=0.5 is our guess for how tall the peak is (since the line goes about 50% deep in the normalised spectrum). 
+# mean=li_center tells the fitter to start looking at our empirical Li position. 
+# stddev=0.5 is our guess for the width. These don't need to be perfect; [GK] see astr142 gaussian fitting for FWHM for recap
 
 # fit
 from specutils.fitting import fit_lines
+# run the gaussian fit using fitting function from fit_lines
 g_fit = fit_lines(full_spec, g_init, window=(region.lower, region.upper))
 print(g_fit)
 
@@ -196,12 +226,19 @@ print(f"Li EW (direct): {(li_ew.to(u.AA)*1000):.1f} mA")
 
 
 # evaluate the gaussian fit on a fine grid
+#### Creates a fine wavelength grid with 10,000 evenly spaced points across the spectrum range. 
+# We use this instead of the original pixel grid because the Gaussian fit is a smooth continuous function
+# So, evaluating it on a fine grid gives a much more accurate integration than using the ~584 original pixels.
 x_fit = np.linspace(
     cont_norm_spec.spectral_axis.min(),
     cont_norm_spec.spectral_axis.max(),
     10000
 )
 y_fit = g_fit(x_fit)
+# Evaluates the best-fit Gaussian at every point in our fine grid. 
+# g_fit is now a callable model, so this just computes the Gaussian function at each wavelength. 
+# Result is an array of 10,000 flux values representing the fitted line profile
+
 
 # build a spectrum from the gaussian fit
 fitted_spec = Spectrum1D(
@@ -210,7 +247,7 @@ fitted_spec = Spectrum1D(
 )
 
 # EW from the gaussian fit
-fitted_li_ew = equivalent_width(fitted_spec, regions=region)
+fitted_li_ew = equivalent_width(fitted_spec, regions=region) # in built function again... don't need to calcualate 
 print(f"Li EW (Gaussian fit): {fitted_li_ew.to(u.AA)*1000:.1f} mA")
 
 
