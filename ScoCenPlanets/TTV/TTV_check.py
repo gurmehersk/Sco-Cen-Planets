@@ -31,6 +31,7 @@ nwalkers = 24
 nsteps = 2500
 nburn = 1000
 thin = 10
+run_number = 2
 
 # Output
 plot_dir = "transit_window_plots"
@@ -138,7 +139,7 @@ print(f"Points removed:         {len(t_full) - len(t_clean)}")
 
 ### now we create a half window variable to allow for off transit points for our polynomial fitter to anchor and use
 
-half_window = 2.0 * duration  # more than enough off transit points for a polynomial imo
+half_window = 2.25 * duration  # more than enough off transit points for a polynomial imo
 
 ## minimum transit number, basically the linear multiple we shd start checking O-C for.
 N_min = int(np.floor((t_clean.min() - t0) / p))
@@ -151,17 +152,18 @@ N_max = int(np.ceil((t_clean.max()-t0)/ p))
 
 transit_numbering = np.arange(N_min, N_max +1)
 
+
+### For each candidate transit number, compute where the linear ephemeris predicts the transit center should be. 
+### This is our prior expectation: if there are no TTVs, the actual transit will be very close to this.
 transit_windows = []
 for N in transit_numbering:
     t_predicted = t0 + N * p
-    mask = np.abs(t_clean - t_predicted) < half_window
 
-    ### the construct of this mask is imp to understand
-    ### For a given transit N, the mask is asking for every point: 
-    # "is this data point close enough to the predicted midpoint
-    # to be included in this window?" draw a visual, it'll help
-    # understand this a lot better. that's what i did [GK] to 
-    # think abt it 
+
+    mask = np.abs(t_clean - t_predicted) < half_window
+    # For every data point in the clean light curve, ask: is this point within half_window (= 2×duration ≈ 0.31 days) of the predicted transit center? 
+    # This creates a boolean array the same length as t_clean. Points inside the window are True, everything else is False. 
+    # You're essentially drawing a time interval around t_predicted and flagging which data points fall inside it.
 
     if mask.sum() > 10: ## if less, chances are we are in a downlink gap, so not enough to fit
         transit_windows.append({
@@ -176,8 +178,9 @@ print(f"Found {len(transit_windows)} transit windows")
 
 
 #------------------------------------------------------------#
+
 # Okay now let's do the polynomial + transit fit
-##-----------------------------------------------------------#
+
 import numpy as np
 import batman
 import matplotlib.pyplot as plt
@@ -194,12 +197,12 @@ rho_star  = 1090.520350    # kg/m³
 # --- Limb darkening (Kipping 2013 to batman u1, u2) ---
 q1 = 0.2654260321 
 q2 = 0.3770894837
-u1 = 2 * np.sqrt(q1) * q2
-u2 = np.sqrt(q1) * (1 - 2 * q2)
+u1 = 2 * np.sqrt(q1) * q2 ### conversion from what juliet outputs to what batman requires as input 
+u2 = np.sqrt(q1) * (1 - 2 * q2) ### ""
 
 G = 6.674e-11
 P_sec = period * 86400
-aRs = ((G * rho_star * P_sec**2) / (3 * np.pi))**(1/3)
+aRs = ((G * rho_star * P_sec**2) / (3 * np.pi))**(1/3) ## semi-major axis derivation from kepler's 3rd law
 print(f"Derived a/R* = {aRs:.4f}")
 
 print("found a/R* = 10.7543167448")
@@ -247,18 +250,15 @@ def full_model(time_arr, t_mid, poly_coeffs):
     return transit * poly
 
 def chi2(theta, time_arr, flux_arr, err_arr):
-    t_mid = theta[0]
-    poly_coeffs = theta[1:]                        # length = poly_order + 1
+    t_mid = theta[0] # theta is a vector that contains all our free params [tmid, c0,c1,c2]
+    poly_coeffs = theta[1:] # polynomial coeficients, and recall length = poly_order + 1
     model = full_model(time_arr, t_mid, poly_coeffs)
     return np.sum(((flux_arr - model) / err_arr)**2)
-
-
-### vibe coded from here 
 
 def log_prior(theta, t_pred, poly_order_local):
     t_mid = theta[0]
     coeffs = theta[1:]
-    # Uniform prior on midpoint near predicted
+    # hard flat prior on midpoint near predicted, this is well constrained/known
     if not (t_pred - 0.5 < t_mid < t_pred + 0.5):
         return -np.inf
     # Weak Gaussian priors on poly coeffs to regularize extremes
@@ -357,10 +357,11 @@ for win in transit_windows:
     axes[1].set_ylabel("Residuals")
     axes[1].set_xlabel("Time (BTJD)")
     plt.tight_layout()
-    plt.savefig(os.path.join(plot_dir, f"transit_N{N:+04d}.png"), dpi=120)
+    plt.savefig(os.path.join(plot_dir, f"transit_N{N:+04d}_v{run_number}.png"), dpi=120)
     plt.close()
     print(f"N={N:+04d} | t_mid={t_mid:.7f} +/- {t_err*24*60:.2f} min")
 print(f"\nSuccessfully measured {len(t_obs_list)} transits.")
+
 # -------------------------------------------------------
 # O-C ANALYSIS (with ephemeris refit)
 # -------------------------------------------------------
@@ -418,7 +419,7 @@ plt.xlabel("Transit number N")
 plt.ylabel("O - C (minutes)")
 plt.title("O-C diagram with MCMC timing errors")
 plt.tight_layout()
-plt.savefig("OC_vs_N.png", dpi=150)
+plt.savefig(f"OC_vs_N_v{run_number}", dpi=150)
 plt.close()
 # Plot O-C vs time
 plt.figure(figsize=(8, 4))
@@ -428,7 +429,7 @@ plt.xlabel("Calculated mid-transit time (BTJD)")
 plt.ylabel("O - C (minutes)")
 plt.title("O-C vs time")
 plt.tight_layout()
-plt.savefig("OC_vs_time.png", dpi=150)
+plt.savefig(f"OC_vs_time_v{run_number}.png", dpi=150)
 plt.close()
 # Save table
 out = np.column_stack([
@@ -445,5 +446,5 @@ header = (
     "N,t_calc_btjd,t_obs_btjd,sigma_tobs_days,"
     "oc_days,oc_err_days,oc_min,oc_err_min"
 )
-np.savetxt("ttv_results.csv", out, delimiter=",", header=header, comments="")
+np.savetxt(f"ttv_results_v{run_number}.csv", out, delimiter=",", header=header, comments="")
 print("Saved: ttv_results.csv, OC_vs_N.png, OC_vs_time.png")
