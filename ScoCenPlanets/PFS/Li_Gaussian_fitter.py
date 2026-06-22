@@ -255,7 +255,7 @@ x_fit_plot = np.linspace(li_center - 2.0, li_center + 2.0, 10000) * u.AA
 y_fit_plot = g_fit(x_fit_plot)
 
 plt.figure(figsize=(10, 5))
-
+'''
 # normalised spectrum
 plt.plot(cont_norm_spec.spectral_axis, cont_norm_spec.flux,
          color='navy', lw=0.8, label='continuum normalised')
@@ -287,36 +287,44 @@ plt.xlim(li_center - 2.5, li_center + 2.5)
 plt.tight_layout()
 plt.savefig('Li_EW_result.pdf', dpi=150, bbox_inches='tight')
 plt.show()
-
+'''
 
 N_mc = 20
 
-# estimate noise from the continuum (away from the Li line)
-continuum_mask = (wm_li < li_center - 1.5) | (wm_li > li_center + 1.5)
-continuum_rms = np.nanstd(cont_norm_spec.flux.value[continuum_mask])
-print(f"Continuum RMS (noise estimate): {continuum_rms:.4f}")
+# estimate noise from the continuum (away from the Li line) ### This was for the normalized spectrum... so we were adding 0.09 to the RAW COUNTS!!!! that was the problem...
+### if we calculate the rms to the raw flux counts... and then add it to fm_li, it will work now!
 
-mc_ews = []
+## let's change this to the raw_continuum_mask 
+raw_continuum_mask = (wm_li < li_center - 1.5) | (wm_li > li_center + 1.5)
+continuum_rms = np.nanstd(cont_norm_spec.flux.value[raw_continuum_mask]) ### noise ruler, how noisy is our baseline 
+raw_continuum_rms = np.nanstd(fm_li[raw_continuum_mask])
+print(f"Continuum RMS (noise estimate): {continuum_rms:.4f}")
+print(f"Raw Continuum RMS (noise estimate): {raw_continuum_rms:.4f}")
+
+mc_ews = [] 
+mc_gaussian_draws = []
 
 for i in range(N_mc):
     np.random.seed(i)
     
     # add random noise to the flux
-    noise = np.random.normal(loc=0, scale=continuum_rms, size=len(fm_li))
+    noise = np.random.normal(loc=0, scale=raw_continuum_rms, size=len(fm_li)) ## generates this random nosie using np.random.normal... note the noise is drawn from a gaussian centered at 0, with 
+    ## width (sclae) = continuum_rms, which was the noise ruler / baseline we calculated 
     
     # rebuild spectrum with noise
     spec_mc = Spectrum1D(
         spectral_axis=wm_li*u.AA,
-        flux=(fm_li + noise)*u.dimensionless_unscaled
+        flux=(fm_li + noise)*u.dimensionless_unscaled ## add the random noise to our spectrum
     )
     
     # refit continuum
     continuum_mc = fit_generic_continuum(
         spec_mc, exclude_regions=exclude_regions
     )(spec_mc.spectral_axis)
-    cont_norm_mc = spec_mc / continuum_mc
+
+    cont_norm_mc = spec_mc / continuum_mc ### normalize 
     
-    # flip and refit gaussian
+    # flip and refit gaussian, same process as above.. could have made it an extra function if necessary.. 
     full_spec_mc = Spectrum1D(
         spectral_axis=cont_norm_mc.spectral_axis,
         flux=(1 - cont_norm_mc.flux)
@@ -333,6 +341,7 @@ for i in range(N_mc):
     
     # evaluate on fine grid and get EW
     y_fit_mc = g_fit_mc(x_fit)
+    mc_gaussian_draws.append(1 - y_fit_mc) # save the gaussian draws
     fitted_spec_mc = Spectrum1D(
         spectral_axis=x_fit,
         flux=(1 - y_fit_mc)*u.dimensionless_unscaled
@@ -351,3 +360,45 @@ merr = p50 - p16
 print(f"\nMonte Carlo result:")
 print(f"EW = {p50:.1f} +{perr:.1f} -{merr:.1f} mA")
 
+x_fit_plot = np.linspace(li_center - 2.0, li_center + 2.0, 10000) * u.AA
+y_fit_plot = g_fit(x_fit_plot)
+
+plt.figure(figsize=(10, 5))
+
+# plot a few MC draws first so they sit behind everything else
+for i, draw in enumerate(mc_gaussian_draws[:10]):  # plot first 10 draws
+    plt.plot(x_fit.value, draw.value,
+             color='lightcoral', lw=0.8, alpha=0.3,
+             label='MC draws' if i == 0 else None)  # only label once
+
+# normalised spectrum
+plt.plot(cont_norm_spec.spectral_axis, cont_norm_spec.flux,
+         color='navy', lw=0.8, label='continuum normalised', zorder=3)
+
+# best fit gaussian
+plt.plot(x_fit_plot, 1 - y_fit_plot,
+         color='red', lw=1.5, label='Gaussian fit', zorder=4)
+
+# integration region
+plt.axvspan(li_center - 1.0, li_center + 1.0,
+            alpha=0.1, color='green', label='integration region (±1Å)')
+
+# reference lines
+plt.axhline(1.0, color='gray', ls='--', lw=0.8)
+plt.axvline(li_center, color='red', ls=':', lw=0.8)
+
+# annotate EW result
+plt.text(0.97, 0.05,
+         f'EW (direct) = 353.8 mÅ\nEW (Gaussian) = {p50:.1f} +{perr:.1f} -{merr:.1f} mÅ',
+         transform=plt.gca().transAxes,
+         ha='right', va='bottom', fontsize=10,
+         bbox=dict(facecolor='white', edgecolor='gray', alpha=0.8))
+
+plt.xlabel('Wavelength (Å)')
+plt.ylabel('Normalised flux')
+plt.title('Li I 6708Å — TIC88297141')
+plt.legend(loc='upper left')
+plt.xlim(li_center - 2.5, li_center + 2.5)
+plt.tight_layout()
+plt.savefig('Li_EW_result.pdf', dpi=150, bbox_inches='tight')
+plt.show()
