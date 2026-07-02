@@ -49,7 +49,7 @@ import pandas as pd
 # SETTINGS
 # -------------------------------------------------------
 number_of_cores = 24
-run_number      = 3  # for file naming — increment for each run with different settings
+run_number      = 4  # for file naming — increment for each run with different settings
 ## run 7, i try impact parameter and planet size as priors 
 # -------------------------------------------------------
 # KNOWN STELLAR / ORBITAL PARAMS
@@ -339,7 +339,7 @@ dists = [
 hyperps = [
     [p, 0.01],           # P_p1 — tight Gaussian on known period
     [T0_in_data, 0.1],   # t0_p1 — tight Gaussian on folded T0
-    [0.0935, 0.005],            # p_p1
+    [0.0935, 0.015],            # p_p1 --> changed this to 0.015... earlier was 0.005 
     [0., 1 + 0.0935],            # b_p1
     [0., 1.],            # q1_TESS
     [0., 1.],            # q2_TESS
