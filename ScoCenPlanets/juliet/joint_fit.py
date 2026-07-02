@@ -49,7 +49,7 @@ import pandas as pd
 # SETTINGS
 # -------------------------------------------------------
 number_of_cores = 24
-run_number      = 2  # for file naming — increment for each run with different settings
+run_number      = 3  # for file naming — increment for each run with different settings
 ## run 7, i try impact parameter and planet size as priors 
 # -------------------------------------------------------
 # KNOWN STELLAR / ORBITAL PARAMS
@@ -405,7 +405,7 @@ print(f"Fitting with dynesty using {number_of_cores} cores...")
 ### we are going to make the dlogz threshold 0.01, instead of the "default" version which runs 
 # when add_live = True. For more info, import dynesty and type help(dynesty.NestedSampler.run_nested)
 
-results = dataset.fit(use_dynesty=True, dynesty_nthreads=number_of_cores, dlogz = 0.01)
+results = dataset.fit(use_dynesty=True, dynesty_nthreads=number_of_cores, dlogz = 0.01, dynesty_sample='rslice')
 # -------------------------------------------------------
 # 7. RESULTS
 # -------------------------------------------------------
