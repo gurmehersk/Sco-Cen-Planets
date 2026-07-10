@@ -14,6 +14,20 @@ of what we can.
 
 UPDATE: 1st June: We now have an additional transit from SSO, that we will try and fit
 This is a full transit... not partial. Good viewing as well..
+
+
+[9th July] Okay, so now we are going to try and execute the various models that Luke 
+has instructed us to try and work through.
+
+theta = [planet size, t0, period, impact parameter [0,1.1], ldc [u1,u2], 2xSHO QP Kernel, nuisane params + jitter..]
+
+Model 1: with the theta as above, w/ GP everywhere, jitter: per instrument. Planet size free!! 
+
+Model 2: theta as above, but for ground based, dont use GP: instead, use a second degree polynomial in time
+
+Model 3; Let (Rp/R*) --> (Rp/R*)i, basically no longer a global param, rather localized... localize to each instrument/band pass 
+
+Model 4: further it to (epoch, bandpass) tuple
 '''
 
 
@@ -50,7 +64,7 @@ import pandas as pd
 # -------------------------------------------------------
 number_of_cores = 24
 run_number      = 4  # for file naming — increment for each run with different settings
-## run 7, i try impact parameter and planet size as priors 
+ 
 # -------------------------------------------------------
 # KNOWN STELLAR / ORBITAL PARAMS
 # -------------------------------------------------------
@@ -61,10 +75,18 @@ rot = 1.8099     # stellar rotation period from Lomb-Scargle (days)
 # -------------------------------------------------------
 # FILE PATHS
 # -------------------------------------------------------
-LCPATH1 = "/home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2025099153000-s0091-0000000088297141-0288-s/tess2025099153000-s0091-0000000088297141-0288-s_lc.fits"
-LCPATH2 = "/home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2025127075000-s0092-0000000088297141-0289-s/tess2025127075000-s0092-0000000088297141-0289-s_lc.fits"
-LCPATH3 = "/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/SWOPE_data/swope_8829.xls.csv" 
-LCPATH4 = "/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/SSO_data/TIC_88297141-22_20260425_LCO-SSO-1.0m_ip_5pix_measurements.tbl"
+
+TESS_S91 = "/home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2025099153000-s0091-0000000088297141-0288-s/tess2025099153000-s0091-0000000088297141-0288-s_lc.fits" # straight up tess data
+TESS_S92 = "/home/gurmeher/.lightkurve/cache/mastDownload/TESS/tess2025127075000-s0092-0000000088297141-0289-s/tess2025127075000-s0092-0000000088297141-0289-s_lc.fits" # tess data 
+SWOPE_R = "/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/SWOPE_data/swope_8829.xls.csv"  # Luke's swope night data 
+SSO_IP = "/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/SSO_data/TIC_88297141-22_20260425_LCO-SSO-1.0m_ip_5pix_measurements.tbl" # Khalid's SSO data (Karen SG1)
+CTIO_Z = "/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/CTIO_data/TIC_88297141_LCOGT_CTIO_20260624_LGBrdx_z-band.csv" # Jerome observations 
+CTIO_G = "/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/CTIO_data/TIC_88297141_LCOGT_CTIO_20260624_LGBrdx_g-band_C2_only.csv" # Jerome's June ctio observations 
+MCD_IP = "/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/Mcdonald_data/TIC88297141-22_20260416_LCO-McD-1m0_ip_5px_KC_bjd-flux-err-detrended.dat" # Wilkins (KC SG1)
+MCD_GP = "/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/Mcdonald_data/TIC88297141-22_20260416_LCO-McD-1m0_gp_4px_KC_bjd-flux-err-detrended.dat"  # Wilkins (KC SG1)
+CTIO_apr_gp = "/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/CTIO_april_data/TIC88297141-22_20260416_LCO-CTIO-1m0_gp_4px_KC_bjd-flux-err-detrended.dat" # Wilkins.. (SG1)
+CTIO_apr_ip = "/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/CTIO_april_data/TIC88297141-22_20260416_LCO-CTIO-1m0_ip_4px_KC_bjd-flux-err-detrended.dat" ### Wilkins and Glauk.. This is different than the above CTIO which was taken by Jerome's team in June (SG1)
+
 # -------------------------------------------------------
 # 1. SIGMA CLIP FUNCTIONS (from WOTAN package)
 # -------------------------------------------------------
@@ -117,42 +139,12 @@ def load_tess_lc(lcpath):
     mask = np.isfinite(time) & np.isfinite(flux) & np.isfinite(ferr)
     return time[mask], flux[mask], ferr[mask]
 
-def load_swope_lc(lcpath):
-    df = pd.read_csv(lcpath)
-    unconverted_time = df['BJD_TDB'].values 
-    time = unconverted_time - 2457000.0  # Convert to BTJD
-    flux = df['rel_flux_T1'].values 
-    ferr = df['rel_flux_err_T1'].values
-    mask = np.isfinite(time) & np.isfinite(flux) & np.isfinite(ferr)
-    ## normalize
-    flux = flux / np.nanmedian(flux)
-    ferr = ferr / np.nanmedian(flux)
 
-    return time[mask], flux[mask], ferr[mask]
+## Add and normalize tess data 
 
-def load_SSO_lc(lcpath):
-    t = Table.read(lcpath,format="ascii")
-    unconverted_time = t['BJD_TDB'].data
-    time = unconverted_time - 2457000.0 # convert to BTJD
-    flux = t['rel_flux_T1'].data
-    ferr = t['rel_flux_err_T1'].data
-    mask = np.isfinite(time) & np.isfinite(flux) & np.isfinite(ferr)
-    flux = flux / np.nanmedian(flux)
-    ferr = ferr / np.nanmedian(flux)
+t1, flux1, ferr1 = load_tess_lc(TESS_S91)
+t2, flux2, ferr2 = load_tess_lc(TESS_S92)
 
-    return time[mask], flux[mask], ferr[mask]
-
-t1, flux1, ferr1 = load_tess_lc(LCPATH1)
-t2, flux2, ferr2 = load_tess_lc(LCPATH2)
-
-### Adding SWOPE data
-t3, flux3, ferr3 = load_swope_lc(LCPATH3) 
-## note: this is alr normalized inside the load_swope_lc function
-### nOW we dont just stitch this directly, we follow
-## juliet protocol
-
-## Adding SSO data
-t4, flux4, ferr4 = load_SSO_lc(LCPATH4)
 
 # Normalise each sector by its own median
 flux1_norm = flux1 / np.nanmedian(flux1)
@@ -188,6 +180,96 @@ print(f"Points before clipping: {len(t_full)}")
 print(f"Points after clipping:  {len(t_clean)}")
 print(f"Points removed:         {len(t_full) - len(t_clean)}")
 
+## functions to load ground data 
+def load_swope_lc(lcpath):
+    df = pd.read_csv(lcpath)
+    unconverted_time = df['BJD_TDB'].values 
+    time = unconverted_time - 2457000.0  # Convert to BTJD
+    flux = df['rel_flux_T1'].values 
+    ferr = df['rel_flux_err_T1'].values
+    mask = np.isfinite(time) & np.isfinite(flux) & np.isfinite(ferr)
+    ## normalize
+    flux = flux / np.nanmedian(flux)
+    ferr = ferr / np.nanmedian(flux)
+
+    return time[mask], flux[mask], ferr[mask]
+
+def load_SSO_lc(lcpath):
+    t = Table.read(lcpath,format="ascii")
+    unconverted_time = t['BJD_TDB'].data
+    time = unconverted_time - 2457000.0 # convert to BTJD
+    flux = t['rel_flux_T1'].data
+    ferr = t['rel_flux_err_T1'].data
+    mask = np.isfinite(time) & np.isfinite(flux) & np.isfinite(ferr)
+    flux = flux / np.nanmedian(flux)
+    ferr = ferr / np.nanmedian(flux)
+
+    return time[mask], flux[mask], ferr[mask]
+
+def load_CTIO_lc(lcpath):
+    '''
+
+    works for Jerome's CTIO files.. could not just use 
+    the SWOPE function because the comma separation 
+    for these data, which are converted form xls is 
+    a bit sketchy, so to be safe just created another 
+    function.
+
+    '''
+    df = pd.read_csv(lcpath, sep = ",")
+    uncoverted_time = df['BJD_TDB'].values
+    time = unconverted_time - 2457000.0  # convert to BTJD
+    flux = df['rel_flux_T1'].values
+    ferr = df['rel_flux_err_T1'].values
+    mask = np.isfinite(time) & np.isfinite(flux) & np.isfinite(ferr)
+    ## normalize
+    flux = flux / np.nanmedian(flux)
+    ferr = ferr / np.nanmedian(flux)
+
+    return time[mask], flux[mask], ferr[mask]
+
+def load_MCD_CTIO_apr_lc(lcpath):
+    '''
+    Loading the MCD & CTIO files from april. They are both
+    .dat files so there's some consistency in getting the
+    correct formatting done.
+    '''
+    time, flux, ferr = np.loadtxt(lcpath, unpack = True)
+    time -= 2457000.0 # convert to BTJD
+    ## normalize
+
+    flux = flux/np.nanmedian(flux)
+    ferr = ferr / np.nanmedian(flux)
+
+    # mask NaNs
+
+    mask = np.isfinite(time) & np.isfinite(flux) & np.isfinite(ferr)
+
+    return time[mask], flux[mask], ferr[mask]
+
+
+### Retrieving all the ground based data sequentially
+### Note: these lc are alr normalized inside their respective functions
+
+### Adding SWOPE data
+t3, flux3, ferr3 = load_swope_lc(SWOPE_R) 
+
+## Adding SSO data
+t4, flux4, ferr4 = load_SSO_lc(SSO_IP)
+
+## Adding CTIO Jerome
+t5, ctio_z, ctio_z_err = load_CTIO_lc(CTIO_Z)
+t6, ctio_g, ctio_g_err = load_CTIO_lc(CTIO_G)
+
+# Adding MCD 
+t7, mcd_g, mcd_g_err = load_MCD_CTIO_apr_lc(MCD_GP)
+t8, mcd_i, mcd_i_err = load_MCD_CTIO_apr_lc(MCD_IP)
+
+# Adding CTIO Wilkins
+t9, ctio_apr_g, ctio_apr_g_err = load_MCD_CTIO_apr_lc(CTIO_apr_gp)
+t10, ctio_apr_i, ctio_apr_i_err = load_MCD_CTIO_apr_lc(CTIO_apr_ip)
+
+### now we dont just stitch this directly, we follow juliet protocol!! 
 
 # -------------------------------------------------------
 # 3. FOLD T0 INTO DATA WINDOW + IDENTIFY ALL TRANSITS --> Its okay not to do this for SWOPE
@@ -265,6 +347,13 @@ WE might add it if the fit doesnt match our expectations.
 
 FOR SSO, the run we are going to embark on rn [1st June], I will not be adding stellar variability to the fit,
 cuz again, my theory is it can be fit by the offset since it might just be linear...
+'''
+
+
+### 9th July:
+'''
+Let's begin to implement model 2 as it is the easier of the two to implement. 
+
 '''
 params = [
     'P_p1',          # orbital period
