@@ -187,9 +187,10 @@ def load_swope_lc(lcpath):
     ferr = df['rel_flux_err_T1'].values
     mask = np.isfinite(time) & np.isfinite(flux) & np.isfinite(ferr)
     ## normalize
-    flux = flux / np.nanmedian(flux)
-    ferr = ferr / np.nanmedian(flux)
 
+    ferr = ferr / np.nanmedian(flux)
+    flux = flux / np.nanmedian(flux)
+    
     return time[mask], flux[mask], ferr[mask]
 
 def load_SSO_lc(lcpath):
@@ -199,8 +200,10 @@ def load_SSO_lc(lcpath):
     flux = t['rel_flux_T1'].data
     ferr = t['rel_flux_err_T1'].data
     mask = np.isfinite(time) & np.isfinite(flux) & np.isfinite(ferr)
-    flux = flux / np.nanmedian(flux)
+
     ferr = ferr / np.nanmedian(flux)
+    flux = flux / np.nanmedian(flux)
+    
 
     return time[mask], flux[mask], ferr[mask]
 
@@ -215,15 +218,15 @@ def load_CTIO_lc(lcpath):
 
     '''
     df = pd.read_csv(lcpath, sep = ",")
-    uncoverted_time = df['BJD_TDB'].values
+    unconverted_time = df['BJD_TDB'].values
     time = unconverted_time - 2457000.0  # convert to BTJD
     flux = df['rel_flux_T1'].values
     ferr = df['rel_flux_err_T1'].values
     mask = np.isfinite(time) & np.isfinite(flux) & np.isfinite(ferr)
     ## normalize
-    flux = flux / np.nanmedian(flux)
     ferr = ferr / np.nanmedian(flux)
-
+    flux = flux / np.nanmedian(flux)
+    
     return time[mask], flux[mask], ferr[mask]
 
 def load_MCD_CTIO_apr_lc(lcpath):
@@ -236,8 +239,9 @@ def load_MCD_CTIO_apr_lc(lcpath):
     time -= 2457000.0 # convert to BTJD
     ## normalize
 
-    flux = flux/np.nanmedian(flux)
     ferr = ferr / np.nanmedian(flux)
+    flux = flux/np.nanmedian(flux)
+    
 
     # mask NaNs
 
@@ -462,7 +466,7 @@ mdilution_values ={
 
 for telescope in ground_telescopes:
     dists.extend(instrument_dists)
-    hyperps.extend([mdilution[telescope],
+    hyperps.extend([mdilution_values[telescope],
     [0., 0.1],
     [0.1, 10000.], ### this is a reasonable jitter to put on all the ground based data... High enough to account for noise in all cases... 
     [0., 1.],
