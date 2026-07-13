@@ -378,7 +378,7 @@ base_params = [
     'GP_Prot_TESS',  # QP kernel rotation period
 ]
 
-ground_telescopes = ['SWOPE', 'SSO', 'CTIO_z']
+ground_telescopes = ['SWOPE', 'SSO', 'CTIO_z', 'CTIO_g', 'mcd_g','mcd_i', 'ctio_apr_g', 'ctio_apr_i']
 
 per_instrument = [
     'mdilution',
@@ -447,15 +447,28 @@ instrument_dists = [
     'uniform',
 ]
 
-instrument_hyperps = [
-    1.0,
+
+## re-evaluate the g band contamination
+
+mdilution_values ={
+'SWOPE': 1.0 , 
+'SSO': 0.985, 
+'CTIO_z': 1.0, 
+'CTIO_g': 1.0 , # for now
+'mcd_g': 1.0, # for now
+'mcd_i': 0.965, 
+'ctio_apr_g' : 1.0, # for now  
+'ctio_apr_i': 0.985}
+
+for telescope in ground_telescopes:
+    dists.extend(instrument_dists)
+    hyperps.extend([mdilution[telescope],
     [0., 0.1],
     [0.1, 10000.], ### this is a reasonable jitter to put on all the ground based data... High enough to account for noise in all cases... 
     [0., 1.],
     [0., 1.],
     [-1., 1.],
-    [-1., 1.],
-]
+    [-1., 1.],])
 
 # Populate priors dictionary in juliet format
 for param, dist, hyperp in zip(params, dists, hyperps):
@@ -463,20 +476,41 @@ for param, dist, hyperp in zip(params, dists, hyperps):
     priors[param]['distribution']   = dist
     priors[param]['hyperparameters'] = hyperp
 
+## adding linear regressors (quadratic polynomial to the juliet fit)
+t_bar_SWOPE = np.mean(t3)
+t_bar_SSO = np.mean(t4)
+t_bar_ctio_z = np.mean(t5)
+t_bar_ctio_g = np.mean(t6)
+t_bar_mcd_g = np.mean(t7)
+t_bar_mcd_i = np.mean(t8)
+t_bar_ctio_apr_g = np.mean(t9)
+t_bar_ctio_apr_i = np.mean(t10)
+
+lm_regressors = {
+    'SWOPE': np.column_stack([t3 - t_bar_SWOPE, (t3 - t_bar_SWOPE)**2]),
+    'SSO': np.column_stack([t4 - t_bar_SSO, (t4 - t_bar_SSO)**2]),
+    'CTIO_z': np.column_stack([t5 - t_bar_ctio_z, (t5 - t_bar_ctio_z)**2]),
+    'CTIO_g' : np.column_stack([t6 - t_bar_ctio_g, (t6 - t_bar_ctio_g)**2]), 
+    'mcd_g': np.column_stack([t7 - t_bar_mcd_g, (t7 - t_bar_mcd_g)**2]),
+    'mcd_i' : np.column_stack([t8 - t_bar_mcd_i, (t8 - t_bar_mcd_i)**2]),
+    'ctio_apr_g': np.column_stack([t9 - t_bar_ctio_apr_g, (t9 - t_bar_ctio_apr_g)**2]),
+    'ctio_apr_i': np.column_stack([t10 - t_bar_ctio_apr_i, (t10 - t_bar_ctio_apr_i)**2]),
+}
 
 # -------------------------------------------------------
 # 5. LOAD DATASET INTO JULIET
 # -------------------------------------------------------
-times        = {'TESS': t_clean, 'SWOPE': t3, 'SSO': t4}
-fluxes       = {'TESS': flux_clean, 'SWOPE': flux3, 'SSO': flux4}
-fluxes_error = {'TESS': ferr_clean, 'SWOPE': ferr3, 'SSO': ferr4}
+times        = {'TESS': t_clean, 'SWOPE': t3, 'SSO': t4, 'CTIO_z': t5, 'CTIO_g': t6, 'mcd_g': t7,'mcd_i': t8, 'ctio_apr_g' : t9 , 'ctio_apr_i': t10}
+fluxes       = {'TESS': flux_clean, 'SWOPE': flux3, 'SSO': flux4, 'CTIO_z': ctio_z, 'CTIO_g': ctio_g, 'mcd_g': mcd_g,'mcd_i': mcd_i, 'ctio_apr_g' : ctio_apr_g , 'ctio_apr_i': ctio_apr_i }
+fluxes_error = {'TESS': ferr_clean, 'SWOPE': ferr3, 'SSO': ferr4, 'CTIO_z': ctio_z_err, 'CTIO_g': ctio_g_err, 'mcd_g': mcd_g_err, 'mcd_i': mcd_i_err, 'ctio_apr_g' : ctio_apr_g_err , 'ctio_apr_i': ctio_apr_i_err}
 
 dataset = juliet.load(
     priors         = priors,
     t_lc           = times,
     y_lc           = fluxes,
     yerr_lc        = fluxes_error,
-    GP_regressors_lc = {'TESS': t_clean}, # GP regressor only for TESS, NOT for SWOPE.. reasoning explained above 
+    GP_regressors_lc = {'TESS': t_clean}, # GP regressor only for TESS, 
+    linear_regressors_lc=lm_regressors, ## polynomials for the ground based data...  
     out_folder     = f'88297141_GP_QP_joint_SSO_SWOPE_v{run_number}',
     verbose        = True
 )
