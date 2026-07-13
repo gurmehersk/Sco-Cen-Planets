@@ -30,6 +30,7 @@ Model 3; Let (Rp/R*) --> (Rp/R*)i, basically no longer a global param, rather lo
 Model 4: further it to (epoch, bandpass) tuple
 '''
 
+#### Run without bandpass specific limb darkening coefficients. Make it a global parameter. 
 
 from astropy.table import Table
 import juliet
@@ -43,8 +44,6 @@ import corner
 import pandas as pd
 import os
 
-results_dir = os.path.join('results', f'run_v{run_number}')
-os.makedirs(results_dir, exist_ok=True)
 
 ### 29th March 2026 
 #### REMINDERS FOR dynesty and nested sampling in general #### 
@@ -69,6 +68,9 @@ os.makedirs(results_dir, exist_ok=True)
 number_of_cores = 24
 run_number      = 1   # for file naming — increment for each run with different settings
  
+results_dir = os.path.join('results', f'run_v{run_number}')
+os.makedirs(results_dir, exist_ok=True)
+
 # -------------------------------------------------------
 # KNOWN STELLAR / ORBITAL PARAMS
 # -------------------------------------------------------
@@ -386,14 +388,13 @@ base_params = [
     'GP_Prot_TESS',  # QP kernel rotation period
 ]
 
-ground_telescopes = ['SWOPE', 'SSO', 'CTIO_z', 'CTIO_g', 'mcd_g','mcd_i', 'ctio_apr_g', 'ctio_apr_i']
+ground_telescopes = ['SWOPE', 'SSO', 'CTIOz', 'CTIOg', 'mcdg','mcdi', 'ctioaprg', 'ctioapri'] ### instrument names should NOT have an __ in them! Juliet uses underscores as a method of identification!!! Be cautious 
 
+### removing per instrument's q1 and q2, cuz we will try and fit these together... 
 per_instrument = [
     'mdilution',
     'mflux',
     'sigma_w',
-    'q1',
-    'q2',
     'theta0',
     'theta1',
 ]
@@ -451,8 +452,6 @@ instrument_dists = [
     'loguniform',
     'uniform',
     'uniform',
-    'uniform',
-    'uniform',
 ]
 
 
@@ -461,22 +460,43 @@ instrument_dists = [
 mdilution_values ={
 'SWOPE': 1.0 , 
 'SSO': 0.985, 
-'CTIO_z': 1.0, 
-'CTIO_g': 1.0 , # for now
-'mcd_g': 1.0, # for now
-'mcd_i': 0.965, 
-'ctio_apr_g' : 1.0, # for now  
-'ctio_apr_i': 0.985}
+'CTIOz': 1.0, 
+'CTIOg': 0.99 , # for now
+'mcdg': 0.97, # for now
+'mcdi': 0.965, 
+'ctioaprg' :0.98, # for now  
+'ctioapri': 0.985}
 
 for telescope in ground_telescopes:
     dists.extend(instrument_dists)
     hyperps.extend([mdilution_values[telescope],
     [0., 0.1],
     [0.1, 10000.], ### this is a reasonable jitter to put on all the ground based data... High enough to account for noise in all cases... 
-    [0., 1.],
-    [0., 1.],
     [-1., 1.],
     [-1., 1.],])
+
+
+
+# Limb darkening: shared within filter-matched groups,
+# individual for telescopes with no filter partner (SWOPE, CTIOz)
+
+# should work.. and if it does, we can use this same ideology and logic for the planet size and depth constraint... 
+g_band_key = '_'.join(['CTIOg', 'mcdg', 'ctioaprg'])
+i_band_key = '_'.join(['SSO', 'mcdi', 'ctioapri'])
+
+solo_ld_telescopes = ['SWOPE', 'CTIOz']
+for telescope in solo_ld_telescopes:
+    params  += [f'q1_{telescope}', f'q2_{telescope}']
+    dists   += ['uniform', 'uniform']
+    hyperps += [[0., 1.], [0., 1.]]
+
+params  += [f'q1_{g_band_key}', f'q2_{g_band_key}', f'q1_{i_band_key}', f'q2_{i_band_key}']
+dists   += ['uniform', 'uniform', 'uniform', 'uniform']
+hyperps += [[0., 1.], [0., 1.], [0., 1.], [0., 1.]]
+
+# sanity check before building priors — catch length mismatches early
+assert len(params) == len(dists) == len(hyperps), \
+    f"mismatch: {len(params)} params, {len(dists)} dists, {len(hyperps)} hyperps"
 
 # Populate priors dictionary in juliet format
 for param, dist, hyperp in zip(params, dists, hyperps):
@@ -497,20 +517,20 @@ t_bar_ctio_apr_i = np.mean(t10)
 lm_regressors = {
     'SWOPE': np.column_stack([t3 - t_bar_SWOPE, (t3 - t_bar_SWOPE)**2]),
     'SSO': np.column_stack([t4 - t_bar_SSO, (t4 - t_bar_SSO)**2]),
-    'CTIO_z': np.column_stack([t5 - t_bar_ctio_z, (t5 - t_bar_ctio_z)**2]),
-    'CTIO_g' : np.column_stack([t6 - t_bar_ctio_g, (t6 - t_bar_ctio_g)**2]), 
-    'mcd_g': np.column_stack([t7 - t_bar_mcd_g, (t7 - t_bar_mcd_g)**2]),
-    'mcd_i' : np.column_stack([t8 - t_bar_mcd_i, (t8 - t_bar_mcd_i)**2]),
-    'ctio_apr_g': np.column_stack([t9 - t_bar_ctio_apr_g, (t9 - t_bar_ctio_apr_g)**2]),
-    'ctio_apr_i': np.column_stack([t10 - t_bar_ctio_apr_i, (t10 - t_bar_ctio_apr_i)**2]),
+    'CTIOz': np.column_stack([t5 - t_bar_ctio_z, (t5 - t_bar_ctio_z)**2]),
+    'CTIOg' : np.column_stack([t6 - t_bar_ctio_g, (t6 - t_bar_ctio_g)**2]), 
+    'mcdg': np.column_stack([t7 - t_bar_mcd_g, (t7 - t_bar_mcd_g)**2]),
+    'mcdi' : np.column_stack([t8 - t_bar_mcd_i, (t8 - t_bar_mcd_i)**2]),
+    'ctioaprg': np.column_stack([t9 - t_bar_ctio_apr_g, (t9 - t_bar_ctio_apr_g)**2]),
+    'ctioapri': np.column_stack([t10 - t_bar_ctio_apr_i, (t10 - t_bar_ctio_apr_i)**2]),
 }
 
 # -------------------------------------------------------
 # 5. LOAD DATASET INTO JULIET
 # -------------------------------------------------------
-times        = {'TESS': t_clean, 'SWOPE': t3, 'SSO': t4, 'CTIO_z': t5, 'CTIO_g': t6, 'mcd_g': t7,'mcd_i': t8, 'ctio_apr_g' : t9 , 'ctio_apr_i': t10}
-fluxes       = {'TESS': flux_clean, 'SWOPE': flux3, 'SSO': flux4, 'CTIO_z': ctio_z, 'CTIO_g': ctio_g, 'mcd_g': mcd_g,'mcd_i': mcd_i, 'ctio_apr_g' : ctio_apr_g , 'ctio_apr_i': ctio_apr_i }
-fluxes_error = {'TESS': ferr_clean, 'SWOPE': ferr3, 'SSO': ferr4, 'CTIO_z': ctio_z_err, 'CTIO_g': ctio_g_err, 'mcd_g': mcd_g_err, 'mcd_i': mcd_i_err, 'ctio_apr_g' : ctio_apr_g_err , 'ctio_apr_i': ctio_apr_i_err}
+times        = {'TESS': t_clean, 'SWOPE': t3, 'SSO': t4, 'CTIOz': t5, 'CTIOg': t6, 'mcdg': t7,'mcdi': t8, 'ctioaprg' : t9 , 'ctioapri': t10}
+fluxes       = {'TESS': flux_clean, 'SWOPE': flux3, 'SSO': flux4, 'CTIOz': ctio_z, 'CTIOg': ctio_g, 'mcdg': mcd_g,'mcdi': mcd_i, 'ctioaprg' : ctio_apr_g , 'ctioapri': ctio_apr_i }
+fluxes_error = {'TESS': ferr_clean, 'SWOPE': ferr3, 'SSO': ferr4, 'CTIOz': ctio_z_err, 'CTIOg': ctio_g_err, 'mcdg': mcd_g_err, 'mcdi': mcd_i_err, 'ctioaprg' : ctio_apr_g_err , 'ctioapri': ctio_apr_i_err}
 
 dataset = juliet.load(
     priors         = priors,
@@ -682,7 +702,7 @@ ax2.grid(alpha=0.3)
 ax2.set_title('Phase-folded transit')
 
 plt.tight_layout()
-plt.savefig(os.path.join(results_dir, f'88297141_GP_QP_fit_joint_v{run_number}.png', dpi=300, bbox_inches='tight'))
+plt.savefig(os.path.join(results_dir, f'88297141_GP_QP_fit_joint_v{run_number}.png'), dpi=300, bbox_inches='tight')
 plt.close()
 print(f"Saved: 88297141_GP_QP_fit_joint_v{run_number}.png")
 
@@ -710,7 +730,11 @@ print(f"Saved: 88297141_GP_QP_fit_joint_v{run_number}.png")
 '''
 
 
+print("----------------------------------------------")
+print("Check to see if everything ran the way we wanted it to")
+print("----------------------------------------------")
 
+print(results.posteriors['posterior_samples'].keys())
 
 
 
@@ -731,7 +755,7 @@ fig_corner = corner.corner(
     title_kwargs={"fontsize": 10},
     label_kwargs={"fontsize": 12}
 )
-fig_corner.savefig(os.path.join(results_dir, f'88297141_corner_joint_v{run_number}.png', dpi=300, bbox_inches='tight')) 
+fig_corner.savefig(os.path.join(results_dir, f'88297141_corner_joint_v{run_number}.png'), dpi=300, bbox_inches='tight') 
 plt.close()
 print(f"Saved: 88297141_corner_joint_v{run_number}.png")
 print("Done.")
