@@ -41,6 +41,10 @@ from astropy.io import fits
 from matplotlib import gridspec
 import corner
 import pandas as pd
+import os
+
+results_dir = os.path.join('results', f'run_v{run_number}')
+os.makedirs(results_dir, exist_ok=True)
 
 ### 29th March 2026 
 #### REMINDERS FOR dynesty and nested sampling in general #### 
@@ -63,7 +67,7 @@ import pandas as pd
 # SETTINGS
 # -------------------------------------------------------
 number_of_cores = 24
-run_number      = 4  # for file naming — increment for each run with different settings
+run_number      = 1   # for file naming — increment for each run with different settings
  
 # -------------------------------------------------------
 # KNOWN STELLAR / ORBITAL PARAMS
@@ -513,9 +517,9 @@ dataset = juliet.load(
     t_lc           = times,
     y_lc           = fluxes,
     yerr_lc        = fluxes_error,
-    GP_regressors_lc = {'TESS': t_clean}, # GP regressor only for TESS, 
-    linear_regressors_lc=lm_regressors, ## polynomials for the ground based data...  
-    out_folder     = f'88297141_GP_QP_joint_SSO_SWOPE_v{run_number}',
+    GP_regressors_lc = {'TESS': t_clean},
+    linear_regressors_lc=lm_regressors,
+    out_folder     = os.path.join(results_dir, f'88297141_GP_QP_joint_SSO_SWOPE_v{run_number}'),
     verbose        = True
 )
 
@@ -530,7 +534,7 @@ print(f"Fitting with dynesty using {number_of_cores} cores...")
 ### we are going to make the dlogz threshold 0.01, instead of the "default" version which runs 
 # when add_live = True. For more info, import dynesty and type help(dynesty.NestedSampler.run_nested)
 
-results = dataset.fit(use_dynesty=True, dynesty_nthreads=number_of_cores, dlogz = 0.01, dynesty_sample='rslice')
+results = dataset.fit(use_dynesty=True, n_live_points = 750, dynesty_nthreads=number_of_cores, dlogz = 0.5, dynesty_sample='rslice') ## changing dlogz to 0.5 for exploratory run.. for actual investigation make it 0.01 
 # -------------------------------------------------------
 # 7. RESULTS
 # -------------------------------------------------------
@@ -603,7 +607,7 @@ phases  = juliet.utils.get_phases(dataset.times_lc['TESS'], p_best, t0_best)
 
 ### added this to save the gp stuff cuz im not able to access em
 np.savez(
-    f'88297141_GP_QP_joint_v{run_number}_gp_results.npz',
+    os.path.join(results_dir, f'88297141_GP_QP_joint_v{run_number}_gp_results.npz'),
     time=dataset.times_lc['TESS'],
     flux=dataset.data_lc['TESS'],
     fluxerr=dataset.errors_lc['TESS'],
@@ -678,7 +682,7 @@ ax2.grid(alpha=0.3)
 ax2.set_title('Phase-folded transit')
 
 plt.tight_layout()
-plt.savefig(f'88297141_GP_QP_fit_joint_v{run_number}.png', dpi=300, bbox_inches='tight')
+plt.savefig(os.path.join(results_dir, f'88297141_GP_QP_fit_joint_v{run_number}.png', dpi=300, bbox_inches='tight'))
 plt.close()
 print(f"Saved: 88297141_GP_QP_fit_joint_v{run_number}.png")
 
@@ -727,7 +731,7 @@ fig_corner = corner.corner(
     title_kwargs={"fontsize": 10},
     label_kwargs={"fontsize": 12}
 )
-fig_corner.savefig(f'88297141_corner_joint_v{run_number}.png', dpi=300, bbox_inches='tight')
+fig_corner.savefig(os.path.join(results_dir, f'88297141_corner_joint_v{run_number}.png', dpi=300, bbox_inches='tight')) 
 plt.close()
 print(f"Saved: 88297141_corner_joint_v{run_number}.png")
 print("Done.")
