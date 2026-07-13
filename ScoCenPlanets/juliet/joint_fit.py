@@ -139,12 +139,10 @@ def load_tess_lc(lcpath):
     mask = np.isfinite(time) & np.isfinite(flux) & np.isfinite(ferr)
     return time[mask], flux[mask], ferr[mask]
 
-
 ## Add and normalize tess data 
 
 t1, flux1, ferr1 = load_tess_lc(TESS_S91)
 t2, flux2, ferr2 = load_tess_lc(TESS_S92)
-
 
 # Normalise each sector by its own median
 flux1_norm = flux1 / np.nanmedian(flux1)
@@ -247,7 +245,6 @@ def load_MCD_CTIO_apr_lc(lcpath):
 
     return time[mask], flux[mask], ferr[mask]
 
-
 ### Retrieving all the ground based data sequentially
 ### Note: these lc are alr normalized inside their respective functions
 
@@ -315,7 +312,6 @@ print("Number of SWOPE points:", len(t3))
 # -------------------------------------------------------
 priors = {}
 
-
 ###
 ## [28th APril 2026]
 '''
@@ -354,8 +350,16 @@ cuz again, my theory is it can be fit by the offset since it might just be linea
 '''
 Let's begin to implement model 2 as it is the easier of the two to implement. 
 
+Extra food for thought: We know there's a level of contamination in some of the data,
+because of the binary companion. Especialy in the case where there is 5px in the Mcdonald data,
+Karen's email highlights the potential contamination... however this contamination is never 
+quantified. Similarly, in the Barkhaoui data, due to poor seeing conditions, there is some 
+level of contamination. If we knew the quantitative effect/extent of the contamination,
+we could add it as a fixed value to 'mdilution_instrument' for that respective instrument.
+However, i don't think we have a great hold on the quantitative value...
+
 '''
-params = [
+base_params = [
     'P_p1',          # orbital period
     't0_p1',         # transit centre
     'p_p1',         # depth 
@@ -372,27 +376,30 @@ params = [
     'GP_C_TESS',     # QP kernel harmonic complexity
     'GP_L_TESS',     # QP kernel decay timescale
     'GP_Prot_TESS',  # QP kernel rotation period
-
-    ## add swope params
-    'mdilution_SWOPE',
-    'mflux_SWOPE',
-    'sigma_w_SWOPE',
-    'q1_SWOPE',
-    'q2_SWOPE',
-
-    # add SSO params
-    'mdilution_SSO',
-    'mflux_SSO',
-    'sigma_w_SSO',
-    'q1_SSO',
-    'q2_SSO'
-
 ]
+
+ground_telescopes = ['SWOPE', 'SSO', 'CTIO_z']
+
+per_instrument = [
+    'mdilution',
+    'mflux',
+    'sigma_w',
+    'q1',
+    'q2',
+    'theta0',
+    'theta1',
+]
+
+params = base_params.copy()
+
+for telescope in ground_telescopes:
+    params += [f'{p}_{telescope}' for p in per_instrument]
+
 
 dists = [
     'normal',        # P_p1
     'normal',        # t0_p1
-    'normal',       # p_p1 
+    'uniform',       # p_p1 
     'uniform',       # b_p1
     'uniform',       # q1_TESS
     'uniform',       # q2_TESS
@@ -413,13 +420,19 @@ dists = [
     'loguniform',    # sigma_w_SWOPE
     'uniform',       # q1_SWOPE
     'uniform',       # q2_SWOPE
+    'uniform',
+    'uniform',
 
     ## SSO adds
-    'fixed',         # mdilution_SWOPE
-    'normal',        # mflux_SWOPE
-    'loguniform',    # sigma_w_SWOPE
-    'uniform',       # q1_SWOPE
-    'uniform',       # q2_SWOPE
+    'fixed',         # mdilution_SSO
+    'normal',        # mflux_SSO
+    'loguniform',    # sigma_w_SSO
+    'uniform',       # q1_SSO
+    'uniform',       # q2_SSO
+    'uniform',       # theta1_SSO
+    'uniform'        # theta2_SSO
+
+    ## 
 
 ]
 
@@ -428,13 +441,13 @@ dists = [
 hyperps = [
     [p, 0.01],           # P_p1 — tight Gaussian on known period
     [T0_in_data, 0.1],   # t0_p1 — tight Gaussian on folded T0
-    [0.0935, 0.015],            # p_p1 --> changed this to 0.015... earlier was 0.005 
-    [0., 1 + 0.0935],            # b_p1
+    [0, 1],            # p_p1 --> changed this to uniform, instead of normal. Now, we give everything a free shot 
+    [0., 1.1],            # b_p1
     [0., 1.],            # q1_TESS
     [0., 1.],            # q2_TESS
     0.0,                 # ecc_p1
     90.,                 # omega_p1
-    [100, 50000],        # stellar density rho — loguniform, M dwarf range --> change this to [100,50000] for next run
+    [100, 50000],        # stellar density rho — loguniform, M dwarf range 
     1.0,                 # mdilution_TESS
     [0., 0.1],           # mflux_TESS
     [0.1, 1000.],        # sigma_w_TESS — jitter in ppm
@@ -449,6 +462,8 @@ hyperps = [
     [0.1, 10000.],        # sigma_w_SWOPE --> let's increase the upper bound for jitter by 10 since SWOPE _is_ noisy 
     [0., 1.],            # q1_SWOPE
     [0., 1.],            # q2_SWOPE
+    [-1,1],
+    [-1,1],
 
     # SSO additions
     1.0,                 # mdilution_SSO
@@ -456,7 +471,8 @@ hyperps = [
     [0.1, 10000.],        # sigma_w_SSO --> we will keep this the same as SWOPE.. since SSO seeing wasn't great and its also a partial transit 
     [0., 1.],            # q1_SSO
     [0., 1.],            # q2_SSO  
-
+    [-1,1],
+    [-1.1]
 ]
 
 # Populate priors dictionary in juliet format
