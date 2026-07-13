@@ -413,28 +413,8 @@ dists = [
     'uniform',       # GP_C_TESS
     'loguniform',    # GP_L_TESS
     'normal',        # GP_Prot_TESS
-
-    ## SWOPE adds
-    'fixed',         # mdilution_SWOPE
-    'normal',        # mflux_SWOPE
-    'loguniform',    # sigma_w_SWOPE
-    'uniform',       # q1_SWOPE
-    'uniform',       # q2_SWOPE
-    'uniform',
-    'uniform',
-
-    ## SSO adds
-    'fixed',         # mdilution_SSO
-    'normal',        # mflux_SSO
-    'loguniform',    # sigma_w_SSO
-    'uniform',       # q1_SSO
-    'uniform',       # q2_SSO
-    'uniform',       # theta1_SSO
-    'uniform'        # theta2_SSO
-
-    ## 
-
 ]
+
 
 ### on juliet, cannot separate the b and size priors for swope and tess cuz theyre fitted as global parameters 
 ### Change the prior stuff to impact parameter and Rp/Rs parameter...
@@ -455,24 +435,26 @@ hyperps = [
     [0.0,  1.0],         # GP_C_TESS — harmonic complexity
     [0.5,  100.],        # GP_L_TESS — decay timescale
     [rot, 0.5],          # GP_Prot_TESS — Gaussian prior on known rotation period
+]
 
-    #SWOPE ADDITIONS
-    1.0,                 # mdilution_SWOPE
-    [0., 0.1],           # mflux_SWOPE
-    [0.1, 10000.],        # sigma_w_SWOPE --> let's increase the upper bound for jitter by 10 since SWOPE _is_ noisy 
-    [0., 1.],            # q1_SWOPE
-    [0., 1.],            # q2_SWOPE
-    [-1,1],
-    [-1,1],
+instrument_dists = [
+    'fixed',
+    'normal',
+    'loguniform',
+    'uniform',
+    'uniform',
+    'uniform',
+    'uniform',
+]
 
-    # SSO additions
-    1.0,                 # mdilution_SSO
-    [0., 0.1],           # mflux_SSO
-    [0.1, 10000.],        # sigma_w_SSO --> we will keep this the same as SWOPE.. since SSO seeing wasn't great and its also a partial transit 
-    [0., 1.],            # q1_SSO
-    [0., 1.],            # q2_SSO  
-    [-1,1],
-    [-1.1]
+instrument_hyperps = [
+    1.0,
+    [0., 0.1],
+    [0.1, 10000.], ### this is a reasonable jitter to put on all the ground based data... High enough to account for noise in all cases... 
+    [0., 1.],
+    [0., 1.],
+    [-1., 1.],
+    [-1., 1.],
 ]
 
 # Populate priors dictionary in juliet format
