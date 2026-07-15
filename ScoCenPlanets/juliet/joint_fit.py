@@ -65,7 +65,7 @@ import os
 # -------------------------------------------------------
 # SETTINGS
 # -------------------------------------------------------
-number_of_cores = 24
+number_of_cores = 40
 run_number      = 1   # for file naming — increment for each run with different settings
  
 results_dir = os.path.join('results', f'run_v{run_number}')
@@ -678,12 +678,12 @@ idx_sort = np.argsort(phases)
 ax2.errorbar(phases, gp_corrected,
              yerr=dataset.errors_lc['TESS'],
              fmt='.', color='steelblue', alpha=0.15,
-             ms=2, elinewidth=0.5, zorder=1,
+             ms=2, elinewidth=0.5, zorder=2,
              label='GP-corrected data')
 
-# Model — behind binned points
+# Model — behind binned and regular data points
 ax2.plot(phases[idx_sort], transit_model[idx_sort],
-         color='black', lw=2, zorder=2, label='Transit model')
+         color='black', lw=2, zorder=1, label='Transit model')
 
 
 # Binned points — front
@@ -758,4 +758,97 @@ fig_corner = corner.corner(
 fig_corner.savefig(os.path.join(results_dir, f'88297141_corner_joint_v{run_number}.png'), dpi=300, bbox_inches='tight') 
 plt.close()
 print(f"Saved: 88297141_corner_joint_v{run_number}.png")
+
+### Plotting ground based data with transit model:
+
+
+### Bin in phase that is done above's helper function... this is kinda a redundant function but we can keep it to ease
+### the work of the function below 
+
+
+def bin_in_phase(phases, y, yerr, bin_width, phase_range=(-0.05, 0.05)):
+    """Weighted-mean binning in phase space. Returns only non-empty bins."""
+    bin_edges = np.arange(phase_range[0], phase_range[1] + bin_width, bin_width)
+    centers, means, errs = [], [], []
+    for lo, hi in zip(bin_edges[:-1], bin_edges[1:]):
+        in_bin = (phases >= lo) & (phases < hi)
+        if in_bin.sum() > 0:
+            w = 1. / yerr[in_bin]**2
+            centers.append(0.5 * (lo + hi))
+            means.append(np.average(y[in_bin], weights=w))
+            errs.append(1. / np.sqrt(np.sum(w)))
+    return np.array(centers), np.array(means), np.array(errs)
+
+
+def plot_ground_instrument(instrument, save_dir, bin_width_minutes=20.):
+    t_inst    = dataset.times_lc[instrument]
+    data_inst = dataset.data_lc[instrument]
+    err_inst  = dataset.errors_lc[instrument]
+ 
+    # Documented juliet approach for linear-model (non-GP) instruments:
+    # components['lm'] is the polynomial systematics term.
+    full_model, up68, low68, components = results.lc.evaluate(
+        instrument, return_err=True, return_components=True, all_samples=True)
+ 
+    lm_component   = components['lm']
+    pure_transit   = full_model - lm_component     # transit + dilution + oot flux, no trend
+    data_corrected = data_inst - lm_component       # data with poly trend removed
+ 
+    phases   = juliet.utils.get_phases(t_inst, p_best, t0_best)
+    idx_sort = np.argsort(phases)
+ 
+    # Phase window sized to this instrument's own transit coverage
+    phase_span = max(np.abs(phases).max() * 1.1, 0.01)
+    bin_width  = bin_width_minutes / (p_best * 24. * 60.)
+    bin_centers, bin_flux, bin_err = bin_in_phase(
+        phases, data_corrected, err_inst, bin_width,
+        phase_range=(-phase_span, phase_span))
+ 
+    fig = plt.figure(figsize=(14, 5))
+    gs  = gridspec.GridSpec(1, 2, width_ratios=[2, 1])
+ 
+    # Panel 1: full light curve (transit + polynomial trend) -- model behind, data in front
+    ax1 = plt.subplot(gs[0])
+    ax1.plot(t_inst, full_model, color='black', lw=2, zorder=2,
+              label='Transit + polynomial model')
+    ax1.errorbar(t_inst, data_inst, yerr=err_inst, fmt='.', alpha=0.4,
+                 color='steelblue', zorder=3, label='Data')
+    ax1.set_xlabel('Time (BTJD)', fontsize=12)
+    ax1.set_ylabel('Relative flux', fontsize=12)
+    ax1.legend(fontsize=8); ax1.grid(alpha=0.3)
+    ax1.set_title(f'{instrument} -- full light curve')
+ 
+    # Panel 2: phase-folded, detrended data -- model behind, data + bins in front
+    ax2 = plt.subplot(gs[1])
+    ax2.plot(phases[idx_sort], pure_transit[idx_sort], color='black', lw=2,
+              zorder=2, label='Transit model')
+    ax2.errorbar(phases, data_corrected, yerr=err_inst, fmt='.',
+                 color='steelblue', alpha=0.3, ms=4, elinewidth=0.7,
+                 zorder=3, label='Detrended data')
+    if len(bin_centers) > 0:
+        ax2.errorbar(bin_centers, bin_flux, yerr=bin_err, fmt='o',
+                     color='navy', ms=5, elinewidth=1.5, capsize=2,
+                     zorder=4, label=f'{int(bin_width_minutes)}-min bins')
+    ax2.set_xlabel('Phase', fontsize=12)
+    ax2.set_ylabel('Relative flux', fontsize=12)
+    ax2.set_xlim([-phase_span, phase_span])
+    ax2.legend(fontsize=8); ax2.grid(alpha=0.3)
+    ax2.set_title(f'{instrument} -- phase-folded')
+ 
+    plt.tight_layout()
+    outpath = os.path.join(save_dir, f'{instrument}_fit_fixed_zorder.png')
+    plt.savefig(outpath, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"Saved: {outpath}")
+ 
+
+plots_dir = os.path.join(results_dir, 'ground_based_plots')
+os.makedirs(plots_dir, exist_ok=True)
+# -------------------------------------------------------
+# RUN
+# -------------------------------------------------------
+for telescope in ground_telescopes:
+    plot_ground_instrument(telescope, plots_dir)
+
+
 print("Done.")
