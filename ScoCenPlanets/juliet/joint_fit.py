@@ -564,6 +564,42 @@ print("\n" + "="*60)
 print("BEST-FIT PARAMETERS (Median ± 1σ)")
 print("="*60)
 
+### Adding this for easy latex drop and transformation
+
+import pickle
+from make_latex_tables import write_tables
+
+# Save posterior samples + run metadata so tables (or anything else)
+# can be regenerated later WITHOUT re-running the fit.
+with open(os.path.join(results_dir, 'posterior_samples.pkl'), 'wb') as f:
+    pickle.dump(posterior_samples, f)
+
+run_metadata = {
+    'run_number': run_number,
+    'priors': priors,
+    'ground_telescopes': ground_telescopes,
+    'solo_ld_telescopes': solo_ld_telescopes,
+    'g_band_key': g_band_key,
+    'i_band_key': i_band_key,
+}
+with open(os.path.join(results_dir, 'run_metadata.pkl'), 'wb') as f:
+    pickle.dump(run_metadata, f)
+
+# -------------------------------------------------------
+# LATEX TABLES -> \input these directly into ms.tex
+# -------------------------------------------------------
+write_tables(
+    posterior_samples=posterior_samples,
+    priors=priors,
+    ground_telescopes=ground_telescopes,
+    solo_ld_telescopes=solo_ld_telescopes,
+    g_band_key=g_band_key,
+    i_band_key=i_band_key,
+    results_dir=results_dir,
+    run_number=run_number,
+)
+
+
 params_to_report = {
     'P_p1':        'Period (days)',
     't0_p1':       'T0 (BTJD)',
