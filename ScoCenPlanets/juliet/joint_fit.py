@@ -28,6 +28,14 @@ Model 2: theta as above, but for ground based, dont use GP: instead, use a secon
 Model 3; Let (Rp/R*) --> (Rp/R*)i, basically no longer a global param, rather localized... localize to each instrument/band pass 
 
 Model 4: further it to (epoch, bandpass) tuple
+
+
+[GK] 16th July, 2026 --> NOTE TO AUTHORS:
+
+RE-RUN run_number = 1 if you do not want to spend time rerunning the fit. This is the Model 2 execution. You can re-run it if
+you want to make prettier subplots! 
+
+16th July: Now we are trying Model 3, letting Rp/R* float in the bandpass. We are once again gonna keep the limb darkening params float for each bandpass... 
 '''
 
 #### Run without bandpass specific limb darkening coefficients. Make it a global parameter. 
@@ -598,7 +606,6 @@ write_tables(
     results_dir=results_dir,
     run_number=run_number,
 )
-
 
 params_to_report = {
     'P_p1':        'Period (days)',
