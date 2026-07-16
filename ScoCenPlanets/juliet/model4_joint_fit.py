@@ -460,11 +460,11 @@ mdilution_values ={
 for telescope in ground_telescopes:
     dists.extend(instrument_dists)
     hyperps.extend([0,1.0],
-    [mdilution_values[telescope],
+    [mdilution_values[telescope]],
     [0., 0.1],
     [0.1, 10000.], ### this is a reasonable jitter to put on all the ground based data... High enough to account for noise in all cases... 
     [-1., 1.],
-    [-1., 1.],])
+    [-1., 1.],)
 
 
 
