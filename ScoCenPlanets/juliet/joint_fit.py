@@ -38,7 +38,7 @@ you want to make prettier subplots!
 16th July: Now we are trying Model 3, letting Rp/R* float in the bandpass. We are once again gonna keep the limb darkening params float for each bandpass... 
 '''
 
-#### Run without bandpass specific limb darkening coefficients. Make it a global parameter. 
+#### Run without bandpass specific limb darkening coefficients. Make it a global parameter. --> No need tbf.. [according to Luke]
 
 from astropy.table import Table
 import juliet
@@ -633,7 +633,7 @@ for param, label in params_to_report.items():
 r1 = posterior_samples['r1_p1']
 r2 = posterior_samples['r2_p1']
 
-### correcting the impatc parameter and Rp/Rs parameters
+### correcting the impact parameter and Rp/Rs parameters
 
 b, p_p1 = juliet.utils.reverse_bp(r1, r2, 0., 1.)
 
@@ -700,14 +700,77 @@ for i, (lo, hi) in enumerate(zip(bin_edges[:-1], bin_edges[1:])):
 
 
 # --- Plot 1: full light curve + model ---
+
 fig = plt.figure(figsize=(14, 5))
 gs  = gridspec.GridSpec(1, 2, width_ratios=[2, 1])
 ax1 = plt.subplot(gs[0])
 
+
+### Let's also add binned data points! 
+
+from scipy.stats import binned_statistic
+
+binned_time_plot = dataset.times_lc['TESS']
+binned_data_plot = dataset.data_lc['TESS']
+binned_err_plot = dataset.errors_lc['TESS']
+
+# 30 minutes = 30/(24*60) days
+bin_width = 30.0 / (24.0 * 60.0)
+
+bins = np.arange(binned_time_plot.min(), binned_time_plot.max() + bin_width, bin_width)
+
+# Mean time and flux in each bin
+bin_time_plot, _, _ = binned_statistic(binned_time_plot, binned_time_plot,
+                                  statistic='mean', bins=bins)
+bin_flux_plot, _, _ = binned_statistic(binned_time_plot, binned_data_plot,
+                                  statistic='mean', bins=bins)
+
+# Number of points per bin
+counts, _, _ = binned_statistic(binned_time_plot, binned_data_plot,
+                                statistic='count', bins=bins)
+
+# Error of weighted mean (assuming independent measurements)
+weights = 1/binned_err_plot**2
+sumw, _, _ = binned_statistic(binned_time_plot, weights,
+                              statistic='sum', bins=bins)
+bin_err_plot = np.sqrt(1/sumw)
+
+mask = (
+    np.isfinite(bin_time_plot) &
+    np.isfinite(bin_flux_plot) &
+    np.isfinite(bin_err_plot)
+)
+
+bin_time_plot = bin_time_plot[mask]
+bin_flux_plot = bin_flux_plot[mask]
+bin_err_plot  = bin_err_plot[mask]
+
+print(len(bin_time_plot), len(bin_flux_plot), len(bin_err_plot))
+
 ax1.errorbar(dataset.times_lc['TESS'], dataset.data_lc['TESS'],
-             yerr=dataset.errors_lc['TESS'], fmt='.', alpha=0.1, label='Data')
+             yerr=dataset.errors_lc['TESS'], zorder = 1, color = '0.7', alpha = 0.15, fmt='.', label='TESS')
+
+## putting error bars on the binned data wont look aesthetic 
+ax1.scatter(bin_time_plot, bin_flux_plot, s = 2, marker = "o", color='dodgerblue',
+    zorder=4,
+    label='30 minute bins')
+
+### Let's try and reduce the stray line drawn through the data gaps in the model... 
+time_model_plot = dataset.times_lc['TESS']
+model_plot = transit_plus_gp
+
+gap = np.where(np.diff(time_model_plot) > 0.5)[0] + 1
+segments = np.split(np.arange(len(time_model_plot)), gap)
+
+for i, seg in enumerate(segments):
+    ax1.plot(time_model_plot[seg], model_plot[seg],
+             color='black', lw=1.5, zorder = 3,
+             label='Transit + GP model' if i == 0 else None)
+
+'''
 ax1.plot(dataset.times_lc['TESS'], transit_plus_gp,
-         color='black', lw=2, zorder=10, label='Transit + GP model')
+         color='black', lw=2, zorder=1, label='Transit + GP model') '''
+
 ax1.set_xlabel('Time (BTJD)', fontsize=12)
 ax1.set_ylabel('Relative flux', fontsize=12)
 ax1.legend(fontsize=8)
