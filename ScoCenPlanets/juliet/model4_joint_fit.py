@@ -62,7 +62,7 @@ import os
 # SETTINGS
 # -------------------------------------------------------
 number_of_cores = 45
-run_number      = 5    # for file naming — increment for each run with different settings
+run_number      = 7    # for file naming — increment for each run with different settings
  
 results_dir = os.path.join('results', f'run_v{run_number}')
 os.makedirs(results_dir, exist_ok=True)
@@ -70,8 +70,8 @@ os.makedirs(results_dir, exist_ok=True)
 # -------------------------------------------------------
 # KNOWN STELLAR / ORBITAL PARAMS
 # -------------------------------------------------------
-p   = 4.64423    # orbital period (days)
-t0  = 3803.24126 # transit centre (BTJD)
+p   = 4.6446424158    # orbital period (days)
+t0  = 3803.2396602628 # transit centre (BTJD)
 rot = 1.8099     # stellar rotation period from Lomb-Scargle (days)
 
 # -------------------------------------------------------
@@ -464,7 +464,7 @@ mdilution_values ={
 theta0_values = {
 'SWOPE': 0.0438969352 , 
 'SSO': 0.0063451021, 
-'CTIOz': 0.0834374808, 
+'CTIOz': -0.0834374808, 
 'CTIOg': 0.0132476119 , 
 'mcdg': -0.0242282661,
 'mcdi': -0.0467641397, 
