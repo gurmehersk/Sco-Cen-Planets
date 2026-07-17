@@ -523,9 +523,9 @@ for telescope in ground_telescopes:
 g_band_key = '_'.join(['CTIOg', 'mcdg', 'ctioaprg'])
 i_band_key = '_'.join(['SSO', 'mcdi', 'ctioapri'])
 
-'''
+
 solo_ld_telescopes = ['SWOPE', 'CTIOz']
-for telescope in solo_ld_telescopes:
+'''for telescope in solo_ld_telescopes:
     params  += [f'q1_{telescope}', f'q2_{telescope}']
     dists   += ['uniform', 'uniform']
     hyperps += [[0., 1.], [0., 1.]]
@@ -636,9 +636,9 @@ with open(os.path.join(results_dir, 'run_metadata.pkl'), 'wb') as f:
     pickle.dump(run_metadata, f)
 
 params_to_report = {
-    'P_p1':        'Period (days)',
-    't0_p1':       'T0 (BTJD)',
-    'b_p1':        'Impact parameter',
+    #'P_p1':        'Period (days)',
+    #'t0_p1':       'T0 (BTJD)',
+    #'b_p1':        'Impact parameter',
     'rho':         'Stellar density (kg/m³)',
     'GP_B_TESS':   'GP amplitude',
     'GP_C_TESS':   'GP harmonic complexity',
@@ -694,8 +694,10 @@ gp_model        = results.lc.model['TESS']['GP']
 gp_corrected    = dataset.data_lc['TESS'] - gp_model
 
 # Compute phases using best-fit period and t0
-p_best  = np.median(posterior_samples['P_p1'])
-t0_best = np.median(posterior_samples['t0_p1'])
+#p_best  = np.median(posterior_samples['P_p1'])
+#t0_best = np.median(posterior_samples['t0_p1'])
+p_best = p
+t0_best = T0_in_data
 phases  = juliet.utils.get_phases(dataset.times_lc['TESS'], p_best, t0_best)
 
 
@@ -888,10 +890,14 @@ print(results.posteriors['posterior_samples'].keys())
 # (see depth_params). Mixing a per-instrument depth into this corner
 # plot isn't meaningful since there isn't one value to put on the axis.
 # The dedicated depth corner plot below (Plot 3b) covers those.
+''' # we are now fixing period, b and t0 so there will be no posterior samples for them 
 params_corner = ['P_p1', 't0_p1', 'b_p1', 'rho',
                  'GP_B_TESS', 'GP_Prot_TESS']
 labels_corner = ['Period (d)', 'T0 (BTJD)', 'b',
                  'ρ* (kg/m³)', 'GP amp', 'GP Prot (d)']
+'''
+params_corner = ['rho','GP_B_TESS', 'GP_Prot_TESS']
+labels_corner = ['ρ* (kg/m³)', 'GP amp', 'GP Prot (d)']
 
 samples_corner = np.array([posterior_samples[param]
                             for param in params_corner]).T
