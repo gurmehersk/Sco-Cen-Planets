@@ -62,7 +62,7 @@ import os
 # SETTINGS
 # -------------------------------------------------------
 number_of_cores = 45
-run_number      = 4    # for file naming — increment for each run with different settings
+run_number      = 5    # for file naming — increment for each run with different settings
  
 results_dir = os.path.join('results', f'run_v{run_number}')
 os.makedirs(results_dir, exist_ok=True)
@@ -404,10 +404,10 @@ dists = [
     'fixed',       # q2_TESS
     'fixed',         # ecc_p1
     'fixed',         # omega_p1
-    'loguniform',    # rho
+    'fixed',    # rho --> this was loguniform earlier 
     'fixed',         # mdilution_TESS
     'normal',        # mflux_TESS
-    'loguniform',    # sigma_w_TESS
+    'fixed',    # sigma_w_TESS --> this was loguniform earlier 
     'loguniform',    # GP_B_TESS
     'uniform',       # GP_C_TESS
     'loguniform',    # GP_L_TESS
@@ -426,10 +426,10 @@ hyperps = [
     0.42,            # q2_TESS
     0.0,                 # ecc_p1
     90.,                 # omega_p1
-    [100, 50000],        # stellar density rho — loguniform, M dwarf range 
+    1104.4845365365,        # stellar density rho — loguniform, M dwarf range 
     1.0,                 # mdilution_TESS
     [0., 0.1],           # mflux_TESS
-    [0.1, 1000.],        # sigma_w_TESS — jitter in ppm
+    3.8484910717 ,        # sigma_w_TESS — jitter in ppm
     [1e-6, 1.0],         # GP_B_TESS — amplitude
     [0.0,  1.0],         # GP_C_TESS — harmonic complexity
     [0.5,  100.],        # GP_L_TESS — decay timescale
@@ -441,7 +441,7 @@ instrument_dists = [
     'uniform',
     'fixed',
     'normal',
-    'loguniform',
+    'fixed',
     'fixed',
     'fixed',
     'fixed',
@@ -505,12 +505,24 @@ q2_values = {
 'ctioapri': 0.2387239653,
 }
 
+sigma_w_values = {
+'SWOPE':  5028.4204869143 , 
+'SSO': 2683.8084383545, 
+'CTIOz':  2198.8020574457, 
+'CTIOg': 11.7504911128 , 
+'mcdg': 215.4997912206 ,
+'mcdi': 2760.9647315499, 
+'ctioaprg' :  9.2862717989,  
+'ctioapri':  1208.5482826568,
+}
+
+
 for telescope in ground_telescopes:
     dists.extend(instrument_dists)
     hyperps.extend([[0,1.0],
     mdilution_values[telescope],
     [0., 0.1],
-    [0.1, 10000.], ### this is a reasonable jitter to put on all the ground based data... High enough to account for noise in all cases... 
+    sigma_w_values[telescope], ### this is a reasonable jitter to put on all the ground based data... High enough to account for noise in all cases... 
     theta0_values[telescope],
     theta1_values[telescope],
     q1_values[telescope],
@@ -639,12 +651,12 @@ params_to_report = {
     #'P_p1':        'Period (days)',
     #'t0_p1':       'T0 (BTJD)',
     #'b_p1':        'Impact parameter',
-    'rho':         'Stellar density (kg/m³)',
+    #'rho':         'Stellar density (kg/m³)',
     'GP_B_TESS':   'GP amplitude',
     'GP_C_TESS':   'GP harmonic complexity',
     'GP_L_TESS':   'GP decay timescale (days)',
     'GP_Prot_TESS':'GP rotation period (days)',
-    'sigma_w_TESS':'Jitter',
+    #'sigma_w_TESS':'Jitter',
 }
 
 # Localized Rp/R* — one entry per instrument/bandpass (model 3)
