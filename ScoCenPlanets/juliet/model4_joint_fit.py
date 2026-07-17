@@ -908,8 +908,8 @@ params_corner = ['P_p1', 't0_p1', 'b_p1', 'rho',
 labels_corner = ['Period (d)', 'T0 (BTJD)', 'b',
                  'ρ* (kg/m³)', 'GP amp', 'GP Prot (d)']
 '''
-params_corner = ['rho','GP_B_TESS', 'GP_Prot_TESS']
-labels_corner = ['ρ* (kg/m³)', 'GP amp', 'GP Prot (d)']
+params_corner = ['GP_B_TESS', 'GP_Prot_TESS']
+labels_corner = ['GP amp', 'GP Prot (d)']
 
 samples_corner = np.array([posterior_samples[param]
                             for param in params_corner]).T
