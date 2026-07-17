@@ -62,7 +62,7 @@ import os
 # SETTINGS
 # -------------------------------------------------------
 number_of_cores = 45
-run_number      = 3    # for file naming — increment for each run with different settings
+run_number      = 4    # for file naming — increment for each run with different settings
  
 results_dir = os.path.join('results', f'run_v{run_number}')
 os.makedirs(results_dir, exist_ok=True)
@@ -386,6 +386,8 @@ per_instrument = [
     'sigma_w',
     'theta0',
     'theta1',
+    'q1',
+    'q2'
 ]
 
 params = base_params.copy()
@@ -395,11 +397,11 @@ for telescope in ground_telescopes:
 
 
 dists = [
-    'normal',        # P_p1
-    'normal',        # t0_p1
-    'normal',       # b_p1
-    'normal',       # q1_TESS
-    'normal',       # q2_TESS
+    'fixed',        # P_p1
+    'fixed',        # t0_p1
+    'fixed',       # b_p1
+    'fixed',       # q1_TESS
+    'fixed',       # q2_TESS
     'fixed',         # ecc_p1
     'fixed',         # omega_p1
     'loguniform',    # rho
@@ -417,11 +419,11 @@ dists = [
 ### on juliet, cannot separate the b and size priors for swope and tess cuz theyre fitted as global parameters 
 ### Change the prior stuff to impact parameter and Rp/Rs parameter...
 hyperps = [
-    [p, 0.01],           # P_p1 — tight Gaussian on known period
-    [T0_in_data, 0.1],   # t0_p1 — tight Gaussian on folded T0
-    [0.28,0.17],            # b_p1
-    [0.29,0.05],            # q1_TESS
-    [0.42,0.05],            # q2_TESS
+    p,           # P_p1 — tight Gaussian on known period
+    T0_in_data,   # t0_p1 — tight Gaussian on folded T0
+    0.28,            # b_p1
+    0.29,            # q1_TESS
+    0.42,            # q2_TESS
     0.0,                 # ecc_p1
     90.,                 # omega_p1
     [100, 50000],        # stellar density rho — loguniform, M dwarf range 
@@ -440,8 +442,10 @@ instrument_dists = [
     'fixed',
     'normal',
     'loguniform',
-    'normal',
-    'normal',
+    'fixed',
+    'fixed',
+    'fixed',
+    'fixed',
 ]
 
 
@@ -479,16 +483,38 @@ theta1_values ={
 'ctioapri': -0.1568641314,
 }
 
+q1_values = {
+'SWOPE': 0.4458998338  , 
+'SSO': 0.1358051961 , 
+'CTIOz': 0.3507373076, 
+'CTIOg': 0.7679840129   , 
+'mcdg': 0.7679840129  ,
+'mcdi': 0.1358051961 , 
+'ctioaprg' : 0.7679840129 ,  
+'ctioapri': 0.1358051961,
+}
+
+q2_values = {
+'SWOPE':  0.2973008684 , 
+'SSO': 0.2387239653, 
+'CTIOz': 0.2788160357, 
+'CTIOg': 0.7889023060  , 
+'mcdg': 0.7889023060 ,
+'mcdi': 0.2387239653, 
+'ctioaprg' : -0.0488312690,  
+'ctioapri': 0.2387239653,
+}
+
 for telescope in ground_telescopes:
     dists.extend(instrument_dists)
     hyperps.extend([[0,1.0],
     mdilution_values[telescope],
     [0., 0.1],
     [0.1, 10000.], ### this is a reasonable jitter to put on all the ground based data... High enough to account for noise in all cases... 
-    [theta0_values[telescope],0.1],
-    [theta1_values[telescope],0.1]])
-
-
+    theta0_values[telescope],
+    theta1_values[telescope],
+    q1_values[telescope],
+    q2_values[telescope],])
 
 # Limb darkening: prior shared within filter-matched groups,
 # individual for telescopes with no filter partner (SWOPE, CTIOz)
@@ -497,6 +523,7 @@ for telescope in ground_telescopes:
 g_band_key = '_'.join(['CTIOg', 'mcdg', 'ctioaprg'])
 i_band_key = '_'.join(['SSO', 'mcdi', 'ctioapri'])
 
+'''
 solo_ld_telescopes = ['SWOPE', 'CTIOz']
 for telescope in solo_ld_telescopes:
     params  += [f'q1_{telescope}', f'q2_{telescope}']
@@ -506,6 +533,7 @@ for telescope in solo_ld_telescopes:
 params  += [f'q1_{g_band_key}', f'q2_{g_band_key}', f'q1_{i_band_key}', f'q2_{i_band_key}']
 dists   += ['uniform', 'uniform', 'uniform', 'uniform']
 hyperps += [[0., 1.], [0., 1.], [0., 1.], [0., 1.]]
+'''
 
 # sanity check before building priors — catch length mismatches early
 assert len(params) == len(dists) == len(hyperps), \
