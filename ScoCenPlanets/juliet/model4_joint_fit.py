@@ -61,8 +61,8 @@ import os
 # -------------------------------------------------------
 # SETTINGS
 # -------------------------------------------------------
-number_of_cores = 40
-run_number      = 2    # for file naming — increment for each run with different settings
+number_of_cores = 45
+run_number      = 3    # for file naming — increment for each run with different settings
  
 results_dir = os.path.join('results', f'run_v{run_number}')
 os.makedirs(results_dir, exist_ok=True)
@@ -397,9 +397,9 @@ for telescope in ground_telescopes:
 dists = [
     'normal',        # P_p1
     'normal',        # t0_p1
-    'uniform',       # b_p1
-    'uniform',       # q1_TESS
-    'uniform',       # q2_TESS
+    'normal',       # b_p1
+    'normal',       # q1_TESS
+    'normal',       # q2_TESS
     'fixed',         # ecc_p1
     'fixed',         # omega_p1
     'loguniform',    # rho
@@ -419,9 +419,9 @@ dists = [
 hyperps = [
     [p, 0.01],           # P_p1 — tight Gaussian on known period
     [T0_in_data, 0.1],   # t0_p1 — tight Gaussian on folded T0
-    [0., 1.2],            # b_p1
-    [0., 1.],            # q1_TESS
-    [0., 1.],            # q2_TESS
+    [0.28,0.17],            # b_p1
+    [0.29,0.05],            # q1_TESS
+    [0.42,0.05],            # q2_TESS
     0.0,                 # ecc_p1
     90.,                 # omega_p1
     [100, 50000],        # stellar density rho — loguniform, M dwarf range 
@@ -440,8 +440,8 @@ instrument_dists = [
     'fixed',
     'normal',
     'loguniform',
-    'uniform',
-    'uniform',
+    'normal',
+    'normal',
 ]
 
 
@@ -457,14 +457,36 @@ mdilution_values ={
 'ctioaprg' :0.98, # for now  
 'ctioapri': 0.985}
 
+theta0_values = {
+'SWOPE': 0.0438969352 , 
+'SSO': 0.0063451021, 
+'CTIOz': 0.0834374808, 
+'CTIOg': 0.0132476119 , 
+'mcdg': -0.0242282661,
+'mcdi': -0.0467641397, 
+'ctioaprg' :-0.0505324142,  
+'ctioapri': -0.0336544367
+}
+
+theta1_values ={
+'SWOPE': -0.9548363630 , 
+'SSO': 0.1860819577, 
+'CTIOz': 0.1055192487, 
+'CTIOg': 0.2890330217  , 
+'mcdg': -0.0089166863 ,
+'mcdi': -0.2514996279, 
+'ctioaprg' : -0.0488312690,  
+'ctioapri': -0.1568641314,
+}
+
 for telescope in ground_telescopes:
     dists.extend(instrument_dists)
     hyperps.extend([[0,1.0],
     mdilution_values[telescope],
     [0., 0.1],
     [0.1, 10000.], ### this is a reasonable jitter to put on all the ground based data... High enough to account for noise in all cases... 
-    [-1., 1.],
-    [-1., 1.]])
+    [theta0_values[telescope],0.1],
+    [theta1_values[telescope],0.1]])
 
 
 
