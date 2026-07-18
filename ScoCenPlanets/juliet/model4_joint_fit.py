@@ -61,7 +61,7 @@ import os
 # -------------------------------------------------------
 # SETTINGS
 # -------------------------------------------------------
-number_of_cores = 45
+number_of_cores = 50
 run_number      = 7    # for file naming — increment for each run with different settings
  
 results_dir = os.path.join('results', f'run_v{run_number}')
