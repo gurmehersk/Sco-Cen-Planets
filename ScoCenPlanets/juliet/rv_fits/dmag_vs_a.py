@@ -643,7 +643,7 @@ _, xmax = ax.get_xlim() # Keep Matplotlib's auto-scaled right edge for a moment
 # 3. Transit Depth Exclusion Constants
 delta_obs = 0.008
 dmag_limit = -2.5 * np.log10(2 * delta_obs)
-transit_local_au = 2.5 * DIST_PC  
+transit_local_au = 1.945 * DIST_PC  
 
 # Ensure the x-axis extends far enough to show the transit localization limit
 xmax = max(xmax, transit_local_au * 1.5)
