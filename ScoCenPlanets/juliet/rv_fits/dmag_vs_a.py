@@ -633,10 +633,10 @@ ax.plot(rv_sma, rv_dmag, color='forestgreen', lw=2, label='PFS RVs', zorder=5)
 ax.plot(sep_au, dmag_tess_zorro, color='mediumblue', lw=2, label='Gemini/Zorro 832nm', zorder=5)
 
 ax.set_xscale('log')
-'''
+
 # Now pull the dynamic limits so nothing gets cut off! --> IF WE EXECTURE THIS VERSION INSTEAD OF THE ONE JUST BELOW IN LINES 640 + 641.... THERE'S A BIT OF WHITESPACE THERE THEN TOWARD THE LEFT OF THE FINAL PLOT! 
-xmin, xmax = ax.get_xlim()
-'''
+#xmin, xmax = ax.get_xlim()
+
 xmin = np.nanmin(rv_sma)
 _, xmax = ax.get_xlim() # Keep Matplotlib's auto-scaled right edge for a moment
 
@@ -706,14 +706,14 @@ mass_zorro_562 = fn_dmag562_to_mass(dmag_562)
 dmag_tess_zorro_562 = fn_mass_to_dmag_axis(mass_zorro_562)
 
 # Plot the curve (dashed so it doesn't overpower the 832nm line)
-ax.plot(sep_au_562, dmag_tess_zorro_562, color='cornflowerblue', ls='--', lw=1.8, label='Gemini/Zorro 562nm', zorder=5)
+ax.plot(sep_au_562, dmag_tess_zorro_562, color='cornflowerblue', lw=1.8, label='Gemini/Zorro 562nm', zorder=5)
 
 # --- 562nm Inner Working Angle Wall ---
 start_idx_562 = np.argmax(dmag_tess_zorro_562 > 0.1) 
 true_iwa_au_562 = sep_au_562[start_idx_562]
 true_start_dmag_562 = dmag_tess_zorro_562[start_idx_562]
 
-ax.plot([true_iwa_au_562, true_iwa_au_562], [y_top, true_start_dmag_562], color='cornflowerblue', ls='--', lw=1.8, zorder=5)
+ax.plot([true_iwa_au_562, true_iwa_au_562], [y_top, true_start_dmag_562], color='cornflowerblue', lw=1.8, zorder=5)
 # (You usually don't need the outer wall for the shallower curve if the 832nm covers it)
 # -----------------------------------------------------------------------
 # C. STACKED OVERLAP SHADING (Multi-layered grey exclusion zones)
@@ -721,26 +721,29 @@ ax.plot([true_iwa_au_562, true_iwa_au_562], [y_top, true_start_dmag_562], color=
 EXCL_COLOR = 'black'
 EXCL_ALPHA = 0.15
 
-'''
+### Gaia contrast curve... interpolated w/ Web Plot Digitizer from Rizzutto et al. 2018
 
-# --- 4. Gaia Empirical Exclusion Limits ---
-# Standard empirical Gaia DR2/DR3 contrast curve (in arcsec and delta G)
-gaia_sep_arcsec = np.array([0.06, 0.09, 0.35, 1.0, 1.4, 2.0, 3.2, 4.5])
-gaia_dmag = np.array([0.0, 2.0, 2.8, 3.4, 3.5, 4.8, 6.0, 6.2])
+import pandas as pd 
+
+gaia_path = "/home/gurmeher/gurmeher/Sco-Cen-Planets/ScoCenPlanets/gaia/gaia_contrast.csv"
+gaia_df = pd.read_csv(gaia_path)
+
+gaia_sep_arcsec = (gaia_df['sep_milliarcsec'].values) / 1000.
+gaia_dmag = gaia_df['dmag'].values
 
 # Convert separation to AU using your distance
 gaia_sep_au = gaia_sep_arcsec * DIST_PC
 
 # Plot the thick silver Gaia line (plotted directly on the TESS dmag axis 
 # since the broad G and T bandpasses heavily overlap)
-ax.plot(gaia_sep_au, gaia_dmag, color='silver', lw=2.5, label='Gaia', zorder=4)
+ax.plot(gaia_sep_au, gaia_dmag, color='brown', lw=2, label='Gaia', zorder=4)
 
 # Draw the vertical wall to close the right side of the Gaia boundary
-ax.plot([gaia_sep_au[-1], gaia_sep_au[-1]], [y_top, gaia_dmag[-1]], color='silver', lw=2.5, zorder=4)
+ax.plot([gaia_sep_au[-1], gaia_sep_au[-1]], [y_top, gaia_dmag[-1]], color='brown', lw=2, zorder=4)
 
 # Shade the Gaia exclusion zone (using the same stacked grey effect!)
 ax.fill_between(gaia_sep_au, gaia_dmag, y_top, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=1)
-'''
+
 
 # 1. Transit Depth Exclusion (Inverted L-Shape)
 # Fainter than depth limit (Bottom exclusion spanning the whole plot)
