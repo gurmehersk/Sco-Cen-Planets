@@ -12,6 +12,16 @@ from astropy.modeling.models import BlackBody
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
+# 1. Plug in your SED and model values here
+TEFF_TARGET = 3168.4951  
+RSTAR = 0.7375       
+
+# 2. Calculate Luminosity in Solar Luminosities (L_sun)
+LUM_TARGET = (4 * np.pi * (RSTAR * u.Rsun)**2 * const.sigma_sb * (TEFF_TARGET * u.K)**4).to(u.Lsun).value
+
+print(f"Calculated Target Luminosity: {LUM_TARGET:.3f} L_sun")
+
+
 # Apply publication styling
 try:
     import scienceplots
@@ -37,6 +47,7 @@ except ImportError:
 # =======================================================================
 DATADIR = "./data/companion_isochrones/"
 RESULTSDIR = "./results/fpscenarios/"
+TRANS_DIR = "./data/ground_transmission_curves/"
 
 AGE_MYR = 21.0            
 FEH = 0.00                
@@ -208,6 +219,153 @@ zorro_iso_df['dmag_562'] = zorro_iso_df['M_562'] - M_562_TARGET_MODEL
 zorro_by_dmag_562 = zorro_iso_df.sort_values('dmag_562')
 fn_dmag562_to_mass = PchipInterpolator(zorro_by_dmag_562.dmag_562.values, zorro_by_dmag_562.mass.values, extrapolate=False)
 
+
+### WORKING FUNCTION FOR THE HEB SCENARIO!
+
+'''
+add this stuff below to the astrophysical fp. py script 
+'''
+# ---------------------------------------------------------
+# 1. FILE PATHS & CONSTANTS
+# ---------------------------------------------------------
+# TRansmission curve filepath
+FILTER_FILES = {
+    'ctio_g': os.path.join(TRANS_DIR, "GpTransCurve.dat"),
+    'ctio_i': os.path.join(TRANS_DIR, "IpTransCurve.dat"),
+}
+
+
+# 2-sigma depth limits computed from ctioaprg and ctioapri posteriors
+### To be conservative in the g band, we calcualte the lowest possible 2 sigma limit we can get... this was provided in the ctioaprg case 
+CTIO_DEPTH_LIMITS = {
+    'ctio_g': 0.004322, # (0.095575 - 2*0.014916)^2 -> calculated on paper .. this is the ctioaprg one.. just rewritten in this
+    'ctio_i': 0.008226, # (0.101683 - 2*0.005494)^2 
+}
+
+
+## loading the data frame for the isochrone
+df_ic = zorro_iso_df[['mass', 'teff', 'lum']].reset_index(drop=True)
+ 
+def _find_nearest(df, col, mass): 
+    '''
+    Helper function: given a data frame and partciular mass, 
+    finds the closest stellar parameters from a given isochrone
+    '''
+    idx = (df['mass'] - mass).abs().idxmin()
+    return df.loc[idx, col]
+ 
+
+# ---------------------------------------------------------
+# 3. FILTER CURVES + BLACKBODY FLUX
+#    Identical physics to your mentor's get_delta_obs_given_mstars --
+#    TOTAL/CENTRAL eclipses only ("maximally large eclipses"), no
+#    grazing geometry, since we want the most conservative (deepest
+#    possible) depth at each mass pair.
+# ---------------------------------------------------------
+wvlen = np.logspace(1, 5, 2000) * u.nm
+ 
+def _load_filter(path):
+    bpdf = pd.read_csv(path, sep=r'\s+', names=['wvlen_angst', 'transmission'], comment='#')
+    if 'nm' not in bpdf:
+        bpdf['nm'] = bpdf['wvlen_angst'] / 10
+    bp_wvlen = nparr(bpdf['nm'])
+    T_lambda = nparr(bpdf.transmission)
+    if np.nanmax(T_lambda) > 1.1:
+        T_lambda = T_lambda/100 if np.nanmax(T_lambda) < 100 else T_lambda
+    interp_fn = interp1d(bp_wvlen, T_lambda, bounds_error=False, fill_value=0,
+                          kind='quadratic')
+    return interp_fn(wvlen.value)
+ 
+T_LAMBDA = {b: _load_filter(p) for b, p in FILTER_FILES.items()}
+ 
+def _flux_in_band(teff_k, T_lambda_interp):
+    bb = BlackBody(temperature=teff_k*u.K)
+    B_nu = bb(wvlen)
+    B_lambda = (B_nu * (const.c/wvlen**2)).to(u.erg/u.nm/u.s/u.sr/u.cm**2)
+    return 4*np.pi*u.sr * np.trapezoid(B_lambda*T_lambda_interp, wvlen)
+ 
+def max_eclipse_depth(m2, m3, band):
+    """
+    Maximal (CENTRAL, TOTAL) eclipse depth of Star 3 in front of Star 2 in
+    `band`, diluted by the target's (Star 1's) light. Returns NaN if
+    R3 > R2, since a total eclipse of Star 2 by a *larger* Star 3 isn't
+    the geometry this formula covers.
+    """
+    teff2 = _find_nearest(df_ic, 'teff', m2)
+    teff3 = _find_nearest(df_ic, 'teff', m3)
+    lum2 = _find_nearest(df_ic, 'lum', m2)
+    lum3 = _find_nearest(df_ic, 'lum', m3)
+ 
+    r2 = np.sqrt((lum2*u.Lsun)/(4*np.pi*const.sigma_sb*(teff2*u.K)**4)).to(u.Rsun).value
+    r3 = np.sqrt((lum3*u.Lsun)/(4*np.pi*const.sigma_sb*(teff3*u.K)**4)).to(u.Rsun).value
+    if r3 > r2:
+        return np.nan
+ 
+    F1 = _flux_in_band(TEFF_TARGET, T_LAMBDA[band])
+    F2 = _flux_in_band(teff2, T_LAMBDA[band])
+    F3 = _flux_in_band(teff3, T_LAMBDA[band])
+ 
+    L1 = (F1 * 4*np.pi*(RSTAR*u.Rsun)**2).cgs
+    L2 = (F2 * 4*np.pi*(r2*u.Rsun)**2).cgs
+    L3 = (F3 * 4*np.pi*(r3*u.Rsun)**2).cgs
+ 
+    L_ooe = L1 + L2 + L3
+    f = (r3/r2)**2                       # fraction of Star 2's disk blocked -- TOTAL eclipse only
+    L_ie = L1 + L3 + (1-f)*L2
+    return ((L_ooe - L_ie)/L_ooe).value
+ 
+# ---------------------------------------------------------
+# 4. SCAN: for each M2, find the MAX depth over M3/M2 in [0.1, 1]
+# ---------------------------------------------------------
+M2_GRID = np.linspace(0.06, 0.3, 60)
+Q_GRID = np.linspace(0.1, 1.0, 40)   # M3/M2
+ 
+def max_depth_over_q(m2, band):
+    depths = [max_eclipse_depth(m2, q*m2, band) for q in Q_GRID] ### ull notice that the max depths usually occur in the twin binary case... 
+    depths = [d for d in depths if np.isfinite(d)] ### filtering the finite depths... removing the nan depths or unphysical ones
+    return np.nanmax(depths) if depths else np.nan
+ 
+max_depth_grid = {
+    band: nparr([max_depth_over_q(m2, band) for m2 in M2_GRID]) ### so usually shd only get the max twin binary scenarios here... 
+    for band in ['ctio_g', 'ctio_i']
+}
+ 
+# ---------------------------------------------------------
+# 5. M2 EXCLUSION THRESHOLD PER BAND, THEN THE UNION
+# ---------------------------------------------------------
+def m2_threshold(band):
+    """Smallest M2 (on the grid) for which the max achievable depth
+    clears the observed 2-sigma depth floor -- the mass BELOW which this
+    band rules the HEB scenario out entirely."""
+    depths = max_depth_grid[band]
+    obs = CTIO_DEPTH_LIMITS[band]
+    ok = depths >= obs
+    if not np.any(ok):
+        return np.nan
+    return M2_GRID[np.argmax(ok)]
+ 
+m2_thresh_g = m2_threshold('ctio_g')
+m2_thresh_i = m2_threshold('ctio_i')
+m2_thresh_final = np.nanmax([m2_thresh_g, m2_thresh_i])  # union -> stronger band wins, but lowkey dont need this... 
+ 
+print(f"ctio_g 2-sigma depth floor: {CTIO_DEPTH_LIMITS['ctio_g']*1e3:.3f} ppt -> M2 > {m2_thresh_g:.3f} Msun ruled out below")
+print(f"ctio_i 2-sigma depth floor: {CTIO_DEPTH_LIMITS['ctio_i']*1e3:.3f} ppt -> M2 > {m2_thresh_i:.3f} Msun ruled out below")
+print(f"Combined chromatic-HEB exclusion: M2 > {m2_thresh_final:.3f} Msun")
+
+
+assert mass_lo <= min(m2_thresh_g, m2_thresh_i) and max(m2_thresh_g, m2_thresh_i) <= mass_hi, (
+    f"M2 threshold(s) [{m2_thresh_g:.4f}, {m2_thresh_i:.4f}] fall outside "
+    f"iso_df's mass range [{mass_lo:.4f}, {mass_hi:.4f}] used by "
+    f"fn_mass_to_dmag_calibrated -- conversion would silently clip, not extrapolate."
+)
+ 
+dmag_heb_g = float(fn_mass_to_dmag_calibrated(m2_thresh_g))
+dmag_heb_i = float(fn_mass_to_dmag_calibrated(m2_thresh_i))
+ 
+print(f"ctio_g: M2 > {m2_thresh_g:.3f} Msun -> dmag_TESS = {dmag_heb_g:.3f}")
+print(f"ctio_i: M2 > {m2_thresh_i:.3f} Msun -> dmag_TESS = {dmag_heb_i:.3f}")
+
+
 # =======================================================================
 # 2. LOAD OBSERVATIONAL DATA ARRAYS
 # =======================================================================
@@ -246,6 +404,9 @@ dmag_limit = -2.5 * np.log10(2 * delta_obs)
 transit_local_arcsec = 1.945
 transit_local_au = transit_local_arcsec * DIST_PC
 
+g_transit_local_au = 3.112*DIST_PC ## ctio_apr_g aperture was wider than barkhaoui's [above]
+
+
 EXCL_COLOR = 'black'
 EXCL_ALPHA = 0.12
 y_top = 0.0
@@ -265,9 +426,14 @@ l_z832 = ax1.plot(zorro832_sep_au, dmag_tess_zorro832, color='mediumblue', lw=2,
 l_z562 = ax1.plot(zorro562_sep_au, dmag_tess_zorro562, color='cornflowerblue', lw=1.8, label='Gemini/Zorro 562nm', zorder=5)[0]
 l_gaia = ax1.plot(gaia_sep_au, gaia_dmag, color='saddlebrown', lw=2, label='Gaia', zorder=4)[0]
 l_depth = ax1.plot([np.nanmin(rv_sma), transit_local_au], [dmag_limit, dmag_limit], color='black', lw=2, label=r'Transit depth ($\delta_{\mathrm{TESS}}$)', zorder=6)[0]
+# g band
+g_depth = ax1.plot([np.nanmin(rv_sma), g_transit_local_au],[dmag_heb_g,dmag_heb_g], color = 'red', lw = 2, label = r'Transit depth ($\delta_{\mathrm{gp}}$)', zorder = 6)
+
 
 # Vertical Boundary Walls
 ax1.plot([transit_local_au, transit_local_au], [dmag_limit, y_top], color='black', lw=2, zorder=6)
+# g band
+ax1.plot([g_transit_local_au, g_transit_local_au], [dmag_heb_g, y_top], color = 'red', lw =2 , zorder = 6)
 
 start_idx832 = np.argmax(dmag_tess_zorro832 > 0.1669)
 ax1.plot([zorro832_sep_au[start_idx832], zorro832_sep_au[start_idx832]], [y_top, dmag_tess_zorro832[start_idx832]], color='mediumblue', lw=2, zorder=5)
@@ -285,10 +451,17 @@ xmax_au = max(ax1.get_xlim()[1], transit_local_au * 1.5)
 # Exclusion Shading
 ax1.fill_between([xmin_au, xmax_au], dmag_limit, y_bottom, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=1)
 ax1.fill_between([transit_local_au, xmax_au], y_top, dmag_limit, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=1)
-ax1.fill_between(zorro832_sep_au, dmag_tess_zorro832, y_top, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=2)
-ax1.fill_between(zorro562_sep_au, dmag_tess_zorro562, y_top, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=2)
-ax1.fill_between(rv_sma, rv_dmag, y_top, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=3)
+
+ax1.fill_between([xmin_au, xmax_au], dmag_heb_g, y_bottom, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=2)
+# Outside localization radius (Right exclusion from top down to dmag_limit)
+ax1.fill_between([g_transit_local_au, xmax_au], y_top, dmag_heb_g, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=2)
+
+
+ax1.fill_between(zorro832_sep_au, dmag_tess_zorro832, y_top, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=3)
+ax1.fill_between(zorro562_sep_au, dmag_tess_zorro562, y_top, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=3)
+ax1.fill_between(rv_sma, rv_dmag, y_top, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=4)
 ax1.fill_between(gaia_sep_au, gaia_dmag, y_top, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=1)
+
 
 # Formatting Top Subplot
 ax1.set_xscale('log')
