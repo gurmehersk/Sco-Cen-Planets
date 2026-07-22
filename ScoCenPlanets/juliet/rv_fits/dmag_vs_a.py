@@ -444,6 +444,7 @@ bar_raw = bar_raw[bar_raw.mass < 0.1][['mass', 'teff', 'lum']]
 mist_raw = get_mist_teff_lum_grid(mstar_max=1.0)
 
 zorro_iso_df = pd.concat([bar_raw, mist_raw], ignore_index=True).sort_values('mass')
+zorro_iso_df.to_csv("zorro_values_isochrone.csv", index = False)
 zorro_iso_df['M_832'] = abs_mag_in_zorro832_blackbody(
     nparr(zorro_iso_df.lum), nparr(zorro_iso_df.teff))
 
@@ -838,6 +839,7 @@ delta_obs = 0.008
 dmag_limit = -2.5 * np.log10(2 * delta_obs)
 transit_local_au = 1.945 * DIST_PC  
 
+g_transit_local_au = 3.112*DIST_PC
 # Ensure the x-axis extends far enough to show the transit localization limit
 xmax = max(xmax, transit_local_au * 1.5)
 
@@ -853,6 +855,10 @@ y_top = 0.0
 # Transit Depth Boundary (Top-Left Box Outline)
 ax.plot([xmin, transit_local_au], [dmag_limit, dmag_limit], color='black', lw=2, label=r'Transit depth ($\delta_{\mathrm{TESS}}$)', zorder=6)
 ax.plot([transit_local_au, transit_local_au], [dmag_limit, y_top], color='black', lw=2, zorder=6)
+
+# g band
+ax.plot([xmin, g_transit_local_au],[dmag_heb_g,dmag_heb_g], color = 'red', lw = 2, label = r'Transit depth ($\delta_{\mathrm{gp}}$)', zorder = 6)
+ax.plot([g_transit_local_au, g_transit_local_au], [dmag_heb_g, y_top], color = 'red', lw =2 , zorder = 6)
 
 # --- Find where the Speckle curve *actually* starts (ignoring flat/zero regions) ---
 # This finds the first index where the contrast is greater than 0.1 mag
@@ -944,13 +950,17 @@ ax.fill_between([xmin, xmax], dmag_limit, y_bottom, color=EXCL_COLOR, alpha=EXCL
 # Outside localization radius (Right exclusion from top down to dmag_limit)
 ax.fill_between([transit_local_au, xmax], y_top, dmag_limit, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=1)
 
+ax.fill_between([xmin, xmax], dmag_heb_g, y_bottom, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=2)
+# Outside localization radius (Right exclusion from top down to dmag_limit)
+ax.fill_between([g_transit_local_au, xmax], y_top, dmag_heb_g, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=2)
+
 # 2. Speckle Imaging Exclusion (Shade from the blue curve UP to 0 mag)
-ax.fill_between(sep_au, dmag_tess_zorro, y_top, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=2)
+ax.fill_between(sep_au, dmag_tess_zorro, y_top, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=3)
 
 # Shade the 562nm exclusion zone
-ax.fill_between(sep_au_562, dmag_tess_zorro_562, y_top, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=2)
+ax.fill_between(sep_au_562, dmag_tess_zorro_562, y_top, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=3)
 # 3. RV Exclusion (Shade from the green curve UP to 0 mag)
-ax.fill_between(rv_sma, rv_dmag, y_top, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=3)
+ax.fill_between(rv_sma, rv_dmag, y_top, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=4)
 
 
 # -----------------------------------------------------------------------
