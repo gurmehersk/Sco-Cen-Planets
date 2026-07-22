@@ -424,10 +424,10 @@ fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6.2, 8.5), dpi=300)
 l_rv = ax1.plot(rv_sma, rv_dmag, color='forestgreen', lw=2, label='PFS RVs', zorder=5)[0]
 l_z832 = ax1.plot(zorro832_sep_au, dmag_tess_zorro832, color='mediumblue', lw=2, label='Gemini/Zorro 832nm', zorder=5)[0]
 l_z562 = ax1.plot(zorro562_sep_au, dmag_tess_zorro562, color='cornflowerblue', lw=1.8, label='Gemini/Zorro 562nm', zorder=5)[0]
-l_gaia = ax1.plot(gaia_sep_au, gaia_dmag, color='saddlebrown', lw=2, label='Gaia', zorder=4)[0]
+l_gaia = ax1.plot(gaia_sep_au, gaia_dmag, color='saddlebrown', lw=2, label='Gaia DR2', zorder=4)[0]
 l_depth = ax1.plot([np.nanmin(rv_sma), transit_local_au], [dmag_limit, dmag_limit], color='black', lw=2, label=r'Transit depth ($\delta_{\mathrm{TESS}}$)', zorder=6)[0]
 # g band
-g_depth = ax1.plot([np.nanmin(rv_sma), g_transit_local_au],[dmag_heb_g,dmag_heb_g], color = 'red', lw = 2, label = r'Transit depth ($\delta_{\mathrm{gp}}$)', zorder = 6)
+g_depth = ax1.plot([np.nanmin(rv_sma), g_transit_local_au],[dmag_heb_g,dmag_heb_g], color = 'red', lw = 2, label = r'Transit depth ($\delta_{\mathrm{gp}}$)', zorder = 6)[0]
 
 
 # Vertical Boundary Walls
@@ -527,7 +527,7 @@ ax2.set_title('Chance Alignments', fontsize=12, fontweight='bold', pad=8)
 plt.subplots_adjust(hspace=0.25, right=0.72)
 
 # Combine handles from both subplots
-legend_handles = [l_rv, l_z832, l_z562, l_gaia, l_depth]
+legend_handles = [l_rv, l_z832, l_z562, l_gaia, l_depth, g_depth]
 legend_labels = [h.get_label() for h in legend_handles]
 
 # Draw single figure-level legend in the right-side white space
