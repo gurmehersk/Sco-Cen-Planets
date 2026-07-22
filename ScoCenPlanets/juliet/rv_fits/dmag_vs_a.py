@@ -719,7 +719,7 @@ def max_eclipse_depth(m2, m3, band):
 # ---------------------------------------------------------
 # 4. SCAN: for each M2, find the MAX depth over M3/M2 in [0.1, 1]
 # ---------------------------------------------------------
-M2_GRID = np.linspace(0.06, 0.3, 60)
+M2_GRID = np.linspace(0.01, 0.3, 60)
 Q_GRID = np.linspace(0.1, 1.0, 40)   # M3/M2
  
 def max_depth_over_q(m2, band):
