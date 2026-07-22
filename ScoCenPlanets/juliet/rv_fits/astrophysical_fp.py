@@ -317,7 +317,7 @@ def max_eclipse_depth(m2, m3, band):
 # ---------------------------------------------------------
 # 4. SCAN: for each M2, find the MAX depth over M3/M2 in [0.1, 1]
 # ---------------------------------------------------------
-M2_GRID = np.linspace(0.06, 0.3, 60)
+M2_GRID = np.linspace(0.075, 0.3, 60)
 Q_GRID = np.linspace(0.1, 1.0, 40)   # M3/M2
  
 def max_depth_over_q(m2, band):
@@ -427,13 +427,13 @@ l_z562 = ax1.plot(zorro562_sep_au, dmag_tess_zorro562, color='cornflowerblue', l
 l_gaia = ax1.plot(gaia_sep_au, gaia_dmag, color='saddlebrown', lw=2, label='Gaia DR2', zorder=4)[0]
 l_depth = ax1.plot([np.nanmin(rv_sma), transit_local_au], [dmag_limit, dmag_limit], color='black', lw=2, label=r'Transit depth ($\delta_{\mathrm{TESS}}$)', zorder=6)[0]
 # g band
-g_depth = ax1.plot([np.nanmin(rv_sma), g_transit_local_au],[dmag_heb_g,dmag_heb_g], color = 'red', lw = 2, label = r'Transit depth ($\delta_{\mathrm{gp}}$)', zorder = 6)[0]
-
+g_depth_stellar = ax1.plot([np.nanmin(rv_sma), g_transit_local_au],[dmag_heb_g,dmag_heb_g], color = 'red', lw = 2, ls = "--", label = r'Transit Depth (Stellar) ($\delta_{\mathrm{gp}}$)', zorder = 6)[0]
+g_depth_bd = ax1.plot([np.nanmin(rv_sma), g_transit_local_au],[4.144,4.144], color = 'red', lw = 2, label = r'Transit Depth (Sub-Stellar) ($\delta_{\mathrm{gp}}$)', zorder = 6)[0]
 
 # Vertical Boundary Walls
 ax1.plot([transit_local_au, transit_local_au], [dmag_limit, y_top], color='black', lw=2, zorder=6)
 # g band
-ax1.plot([g_transit_local_au, g_transit_local_au], [dmag_heb_g, y_top], color = 'red', lw =2 , zorder = 6)
+ax1.plot([g_transit_local_au, g_transit_local_au], [4.144, y_top], color = 'red', lw =2 , zorder = 6)
 
 start_idx832 = np.argmax(dmag_tess_zorro832 > 0.1669)
 ax1.plot([zorro832_sep_au[start_idx832], zorro832_sep_au[start_idx832]], [y_top, dmag_tess_zorro832[start_idx832]], color='mediumblue', lw=2, zorder=5)
@@ -452,16 +452,59 @@ xmax_au = max(ax1.get_xlim()[1], transit_local_au * 1.5)
 ax1.fill_between([xmin_au, xmax_au], dmag_limit, y_bottom, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=1)
 ax1.fill_between([transit_local_au, xmax_au], y_top, dmag_limit, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=1)
 
-ax1.fill_between([xmin_au, xmax_au], dmag_heb_g, y_bottom, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=2)
+'''
+ax1.fill_between([xmin_au, xmax_au], dmag_heb_g, 4.144, color="brown", alpha=EXCL_ALPHA, zorder=1)
 # Outside localization radius (Right exclusion from top down to dmag_limit)
 ax1.fill_between([g_transit_local_au, xmax_au], y_top, dmag_heb_g, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=2)
+'''
+ax1.fill_between([xmin_au, xmax_au], 4.144, y_bottom, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=3) # 4.144 is hard coded as the value u get when ur mass floor is at 0.01 Msol... 
+# Outside localization radius (Right exclusion from top down to dmag_limit)
+ax1.fill_between([g_transit_local_au, xmax_au], y_top, 4.144, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=3)
 
 
-ax1.fill_between(zorro832_sep_au, dmag_tess_zorro832, y_top, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=3)
-ax1.fill_between(zorro562_sep_au, dmag_tess_zorro562, y_top, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=3)
-ax1.fill_between(rv_sma, rv_dmag, y_top, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=4)
-ax1.fill_between(gaia_sep_au, gaia_dmag, y_top, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=1)
+ax1.fill_between(zorro832_sep_au, dmag_tess_zorro832, y_top, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=4)
+ax1.fill_between(zorro562_sep_au, dmag_tess_zorro562, y_top, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=4)
+ax1.fill_between(rv_sma, rv_dmag, y_top, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=5)
+ax1.fill_between(gaia_sep_au, gaia_dmag, y_top, color=EXCL_COLOR, alpha=EXCL_ALPHA, zorder=4)
 
+
+# ---- restrict the g-band HEB shading to the genuinely unexcluded sliver ----
+#
+# Replaces: ax1.fill_between([xmin_au, xmax_au], dmag_heb_g, 4.144, color="brown", ...)
+# Instead of a blanket rectangle, only shade where RV/Zorro/Gaia/TESS-depth
+# haven't already claimed that (x, y) -- i.e. only in the leftover white gap.
+
+def _domain_interp(x_data, y_data, x_query):
+    """Interpolate y_data(x_data) at x_query; 0.0 (= no exclusion
+    contributed) outside the curve's own data domain, not NaN."""
+    x_data, y_data = np.asarray(x_data), np.asarray(y_data)
+    finite = np.isfinite(x_data) & np.isfinite(y_data)
+    x_data, y_data = x_data[finite], y_data[finite]
+    order = np.argsort(x_data)
+    f = interp1d(x_data[order], y_data[order], bounds_error=False, fill_value=0.0)
+    return f(x_query)
+
+x_fine = np.logspace(np.log10(xmin_au), np.log10(xmax_au), 2000)
+
+rv_excl   = _domain_interp(rv_sma, rv_dmag, x_fine)
+z832_excl = _domain_interp(zorro832_sep_au, dmag_tess_zorro832, x_fine)
+z562_excl = _domain_interp(zorro562_sep_au, dmag_tess_zorro562, x_fine)
+gaia_excl = _domain_interp(gaia_sep_au, gaia_dmag, x_fine)
+
+other_excl_depth = np.maximum.reduce([rv_excl, z832_excl, z562_excl, gaia_excl])
+
+# beyond the TESS-depth localization radius, the ENTIRE column is already
+# grey (its two fill_betweens combine to cover y=0 to y_bottom there) --
+# fold that in so the brown band correctly vanishes past that point too
+fully_excluded_by_tess_depth = x_fine > transit_local_au
+other_excl_depth = np.where(fully_excluded_by_tess_depth, y_bottom, other_excl_depth)
+
+lower_edge = np.maximum(dmag_heb_g, other_excl_depth)   # top of the surviving sliver
+upper_edge = np.full_like(x_fine, 4.144)                # bottom, unchanged
+valid = lower_edge < upper_edge                          # False = fully covered elsewhere
+
+ax1.fill_between(x_fine, lower_edge, upper_edge, where=valid,
+                  color='firebrick', alpha=EXCL_ALPHA, zorder=1)
 
 # Formatting Top Subplot
 ax1.set_xscale('log')
@@ -527,7 +570,7 @@ ax2.set_title('Chance Alignments', fontsize=12, fontweight='bold', pad=8)
 plt.subplots_adjust(hspace=0.25, right=0.72)
 
 # Combine handles from both subplots
-legend_handles = [l_rv, l_z832, l_z562, l_gaia, l_depth, g_depth]
+legend_handles = [l_rv, l_z832, l_z562, l_gaia, l_depth, g_depth_stellar, g_depth_bd]
 legend_labels = [h.get_label() for h in legend_handles]
 
 # Draw single figure-level legend in the right-side white space
@@ -543,6 +586,27 @@ fig.legend(
     framealpha=0.9,
     edgecolor='0.8'             # Subtle grey border
 )
+
+runs, in_run = [], False
+for i, v in enumerate(valid):
+    if v and not in_run:
+        start, in_run = i, True
+    if not v and in_run:
+        runs.append((start, i - 1)); in_run = False
+if in_run:
+    runs.append((start, len(valid) - 1))
+
+if runs:
+    i0, i1 = max(runs, key=lambda r: (np.log10(x_fine[r[1]]) - np.log10(x_fine[r[0]])))
+    x_txt = np.sqrt(x_fine[i0] * x_fine[i1])                 # geometric center (log x-axis)
+    y_txt = 0.5 * (lower_edge[i0:i1+1].mean() + upper_edge[i0:i1+1].mean())
+    ax1.text(x_txt, y_txt, "Brown Dwarf\nHEBs", color='firebrick',
+              fontsize=9, fontweight='bold', style='italic',
+              ha='center', va='center', zorder=7)
+
+for i0, i1 in runs:
+    print(f"gap: {x_fine[i0]:.2f}-{x_fine[i1]:.2f} AU, "
+          f"log-width={np.log10(x_fine[i1])-np.log10(x_fine[i0]):.3f} dex")
 
 # Save
 fig.savefig(OUTPUT_PLOT, dpi=300, bbox_inches='tight')
