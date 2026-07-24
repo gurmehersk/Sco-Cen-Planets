@@ -389,7 +389,7 @@ plt.axvline(li_center, color='red', ls=':', lw=0.8)
 
 # annotate EW result
 plt.text(0.97, 0.05,
-         f'EW (direct) = 353.8 mÅ\nEW (Gaussian) = {p50:.1f} +{perr:.1f} -{merr:.1f} mÅ',
+         f'EW (Gaussian) = {p50:.1f}', # +{perr:.1f} -{merr:.1f} mÅ', for Luke's plotting avoid errors here 
          transform=plt.gca().transAxes,
          ha='right', va='bottom', fontsize=10,
          bbox=dict(facecolor='white', edgecolor='gray', alpha=0.8))
@@ -398,7 +398,7 @@ plt.xlabel('Wavelength (Å)')
 plt.ylabel('Normalised flux')
 plt.title('Li I 6708Å — TIC88297141')
 plt.legend(loc='upper left')
-plt.xlim(li_center - 2.5, li_center + 2.5)
+plt.xlim(li_center - 5, li_center + 5)
 plt.tight_layout()
-plt.savefig('Li_EW_result.pdf', dpi=150, bbox_inches='tight')
+plt.savefig('Li_EW_result_zoomout.pdf', dpi=150, bbox_inches='tight')
 plt.show()
