@@ -3,7 +3,7 @@ CORRECT WORKING CODE FOR GPR USING Quasi Periodic KERNEL
 '''
 
 
-
+import os 
 import juliet
 import numpy as np
 import matplotlib
@@ -33,8 +33,8 @@ import corner
 # -------------------------------------------------------
 # SETTINGS
 # -------------------------------------------------------
-number_of_cores = 24
-run_number      = 10
+number_of_cores = 40
+run_number      = 13
 
 # -------------------------------------------------------
 # KNOWN STELLAR / ORBITAL PARAMS
@@ -93,12 +93,14 @@ def slide_clip(time, data, window_length, low=3, high=3, method=None, center=Non
 # -------------------------------------------------------
 # 2. LOAD + STITCH + NORMALISE + SIGMA CLIP
 # -------------------------------------------------------
+
+### we doing SAP for TRICERATOPS NOW! 
 def load_tess_lc(lcpath):
     with fits.open(lcpath) as hdul:
         data = hdul[1].data
         time = data['TIME']
-        flux = data['PDCSAP_FLUX']
-        ferr = data['PDCSAP_FLUX_ERR']
+        flux = data['SAP_FLUX']
+        ferr = data['SAP_FLUX_ERR']
     mask = np.isfinite(time) & np.isfinite(flux) & np.isfinite(ferr)
     return time[mask], flux[mask], ferr[mask]
 
@@ -197,7 +199,7 @@ params = [
 dists = [
     'normal',        # P_p1
     'normal',        # t0_p1
-    'normal',       # p_p1
+    'uniform',       # p_p1
     'uniform',       # b_p1
     'uniform',       # q1_TESS
     'uniform',       # q2_TESS
@@ -216,8 +218,8 @@ dists = [
 hyperps = [
     [p, 0.01],           # P_p1 — tight Gaussian on known period
     [T0_in_data, 0.1],   # t0_p1 — tight Gaussian on folded T0
-    [0.0935, 0.005],            # p_p1
-    [0., 1.],            # b_p1
+    [0.,1.],            # p_p1
+    [0., 1.2],            # b_p1
     [0., 1.],            # q1_TESS
     [0., 1.],            # q2_TESS
     0.0,                 # ecc_p1
@@ -252,7 +254,7 @@ dataset = juliet.load(
     y_lc           = fluxes,
     yerr_lc        = fluxes_error,
     GP_regressors_lc = times,
-    out_folder     = f'88297141_GP_QP_v{run_number}',
+    out_folder     = f'88297141_GP_QP_SAP_v{run_number}',
     verbose        = True
 )
 
@@ -267,7 +269,7 @@ print(f"Fitting with dynesty using {number_of_cores} cores...")
 ### we are going to make the dlogz threshold 0.01, instead of the "default" version which runs 
 # when add_live = True. For more info, import dynesty and type help(dynesty.NestedSampler.run_nested)
 
-results = dataset.fit(use_dynesty=True, dynesty_nthreads=number_of_cores, dlogz = 0.01)
+results = dataset.fit(use_dynesty=True, dynesty_nthreads=number_of_cores, dlogz = 0.5)
 
 # -------------------------------------------------------
 # 7. RESULTS
@@ -320,6 +322,8 @@ print(f"  Impact parameter b : {b_med:.6f} +{b_hi-b_med:.6f} -{b_med-b_lo:.6f}")
 '''
 print("="*60)
 
+results_dir = os.path.join('results', f'SAP_run_v{run_number}')
+os.makedirs(results_dir, exist_ok=True)
 
 # -------------------------------------------------------
 # 8. PLOTS
@@ -328,6 +332,20 @@ print("="*60)
 transit_plus_gp = results.lc.evaluate('TESS')
 transit_model   = results.lc.model['TESS']['deterministic']
 gp_model        = results.lc.model['TESS']['GP']
+gp_corrected =  dataset.data_lc['TESS'] - gp_model 
+
+### added this to save the gp stuff cuz im not able to access em
+np.savez(
+    os.path.join(results_dir, f'88297141_GP_QP_joint_v{run_number}_gp_SAP_results.npz'),
+    time=dataset.times_lc['TESS'],
+    flux=dataset.data_lc['TESS'],
+    fluxerr=dataset.errors_lc['TESS'],
+    gp=gp_model,
+    deterministic=transit_model,
+    full_model=transit_plus_gp,
+    gp_corrected=gp_corrected
+)
+
 
 # Compute phases using best-fit period and t0
 p_best  = np.median(posterior_samples['P_p1'])
@@ -366,9 +384,9 @@ ax2.grid(alpha=0.3)
 ax2.set_title('Phase-folded transit')
 
 plt.tight_layout()
-plt.savefig(f'88297141_GP_QP_fit_v{run_number}.png', dpi=300, bbox_inches='tight')
+plt.savefig(f'88297141_GP_QP_fit_SAP_v{run_number}.png', dpi=300, bbox_inches='tight')
 plt.close()
-print(f"Saved: 88297141_GP_QP_fit_v{run_number}.png")
+print(f"Saved: 88297141_GP_QP_fit_SAP_v{run_number}.png")
 
 # --- Plot 3: corner plot ---
 params_corner = ['P_p1', 't0_p1', 'p_p1', 'b_p1', 'rho',
@@ -387,7 +405,7 @@ fig_corner = corner.corner(
     title_kwargs={"fontsize": 10},
     label_kwargs={"fontsize": 12}
 )
-fig_corner.savefig(f'88297141_corner_v{run_number}.png', dpi=300, bbox_inches='tight')
+fig_corner.savefig(f'88297141_corner_SAP_v{run_number}.png', dpi=300, bbox_inches='tight')
 plt.close()
-print(f"Saved: 88297141_corner_v{run_number}.png")
+print(f"Saved: 88297141_corner_SAP_v{run_number}.png")
 print("Done.")
