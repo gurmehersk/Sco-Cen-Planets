@@ -34,14 +34,14 @@ import corner
 # SETTINGS
 # -------------------------------------------------------
 number_of_cores = 40
-run_number      = 13
+run_number      = 20
 
 # -------------------------------------------------------
 # KNOWN STELLAR / ORBITAL PARAMS
 # -------------------------------------------------------
 p   = 4.64423    # orbital period (days)
 t0  = 3803.24126 # transit centre (BTJD)
-rot = 1.8099     # stellar rotation period from Lomb-Scargle (days)
+rot = 1.83     # stellar rotation period from Lomb-Scargle (days)
 
 # -------------------------------------------------------
 # FILE PATHS
@@ -113,33 +113,39 @@ flux2_norm = flux2 / np.nanmedian(flux2)
 ferr1_norm = ferr1 / np.nanmedian(flux1)
 ferr2_norm = ferr2 / np.nanmedian(flux2)
 
-# Stitch and sort
-t_full    = np.concatenate([t1, t2])
-flux_full = np.concatenate([flux1_norm, flux2_norm])
-ferr_full = np.concatenate([ferr1_norm, ferr2_norm])
-idx       = np.argsort(t_full)
-t_full    = t_full[idx]
-flux_full = flux_full[idx]
-ferr_full = ferr_full[idx]
+t_full = t1
+# # Stitch and sort
+# t_full    = np.concatenate([t1, t2])
+# flux_full = np.concatenate([flux1_norm, flux2_norm])
+# ferr_full = np.concatenate([ferr1_norm, ferr2_norm])
+# idx       = np.argsort(t_full)
+# t_full    = t_full[idx]
+# flux_full = flux_full[idx]
+# ferr_full = ferr_full[idx]
 
 # Sigma clip — aggressive upward (flares), disabled downward (protect transits)
-flux_clipped = slide_clip(
-    t_full, flux_full.copy(),
-    window_length=0.5,
-    low=100,
-    high=2.5,
-    method='mad',
-    center='median'
-)
+# flux_clipped = slide_clip(
+#     t_full, flux_full.copy(),
+#     window_length=0.5,
+#     low=100,
+#     high=2.5,
+#     method='mad',
+#     center='median'
+# )
+flux_clipped = slide_clip(t1, flux1_norm.copy(), window_length = 0.5, low = 100, high = 2.5, method = 'mad', center = 'median')
+
 
 mask_finite = np.isfinite(flux_clipped)
-t_clean     = t_full[mask_finite]
-flux_clean  = flux_clipped[mask_finite]
-ferr_clean  = ferr_full[mask_finite]
 
-print(f"Points before clipping: {len(t_full)}")
-print(f"Points after clipping:  {len(t_clean)}")
-print(f"Points removed:         {len(t_full) - len(t_clean)}")
+t_clean = t1[mask_finite]
+#t_clean     = t_full[mask_finite]
+flux_clean  = flux_clipped[mask_finite]
+# ferr_clean  = ferr_full[mask_finite]
+ferr_clean = ferr1_norm[mask_finite]
+
+# print(f"Points before clipping: {len(t_full)}")
+# print(f"Points after clipping:  {len(t_clean)}")
+# print(f"Points removed:         {len(t_full) - len(t_clean)}")
 
 
 # -------------------------------------------------------
@@ -269,7 +275,7 @@ print(f"Fitting with dynesty using {number_of_cores} cores...")
 ### we are going to make the dlogz threshold 0.01, instead of the "default" version which runs 
 # when add_live = True. For more info, import dynesty and type help(dynesty.NestedSampler.run_nested)
 
-results = dataset.fit(use_dynesty=True, dynesty_nthreads=number_of_cores, dlogz = 0.5)
+results = dataset.fit(use_dynesty=True, dynesty_nthreads=number_of_cores, dlogz = 0.01)
 
 # -------------------------------------------------------
 # 7. RESULTS
@@ -352,14 +358,46 @@ p_best  = np.median(posterior_samples['P_p1'])
 t0_best = np.median(posterior_samples['t0_p1'])
 phases  = juliet.utils.get_phases(dataset.times_lc['TESS'], p_best, t0_best)
 
+
+# -------------------------------------------------------
+# Phase-fold and bin the GP-corrected data
+# -------------------------------------------------------
+
+def bin_in_phase(phases, y, yerr, bin_width, phase_range=(-0.05, 0.05)):
+    """Weighted-mean binning in phase space. Returns only non-empty bins."""
+    bin_edges = np.arange(phase_range[0], phase_range[1] + bin_width, bin_width)
+    centers, means, errs = [], [], []
+    for lo, hi in zip(bin_edges[:-1], bin_edges[1:]):
+        in_bin = (phases >= lo) & (phases < hi)
+        if in_bin.sum() > 0:
+            w = 1. / yerr[in_bin]**2
+            centers.append(0.5 * (lo + hi))
+            means.append(np.average(y[in_bin], weights=w))
+            errs.append(1. / np.sqrt(np.sum(w)))
+    return np.array(centers), np.array(means), np.array(errs)
+
+bin_width_minutes = 20.
+phase_span = max(np.abs(phases).max() * 1.1, 0.01)
+bin_width  = bin_width_minutes / (p_best * 24. * 60.)
+
+bin_centers, bin_flux, bin_err = bin_in_phase(
+    phases,
+    gp_corrected,
+    dataset.errors_lc['TESS'],
+    bin_width,
+    phase_range=(-phase_span, phase_span)
+)
+
+
 # --- Plot 1: full light curve + model ---
 fig = plt.figure(figsize=(14, 5))
 gs  = gridspec.GridSpec(1, 2, width_ratios=[2, 1])
 ax1 = plt.subplot(gs[0])
+mask = dataset.data_lc['TESS'] > 0.8
 
-ax1.errorbar(dataset.times_lc['TESS'], dataset.data_lc['TESS'],
-             yerr=dataset.errors_lc['TESS'], fmt='.', alpha=0.1, label='Data')
-ax1.plot(dataset.times_lc['TESS'], transit_plus_gp,
+ax1.errorbar(dataset.times_lc['TESS'][mask], dataset.data_lc['TESS'][mask],
+             yerr=dataset.errors_lc['TESS'][mask], fmt='.', alpha=0.1, label='Data')
+ax1.plot(dataset.times_lc['TESS'][mask], transit_plus_gp[mask],
          color='black', lw=2, zorder=10, label='Transit + GP model')
 ax1.set_xlabel('Time (BTJD)', fontsize=12)
 ax1.set_ylabel('Relative flux', fontsize=12)
@@ -376,12 +414,31 @@ ax2.errorbar(phases, dataset.data_lc['TESS'] - gp_model,
              label='GP-corrected data')
 ax2.plot(phases[idx_sort], transit_model[idx_sort],
          color='black', lw=2, zorder=10, label='Transit model')
+if len(bin_centers) > 0:
+    ax2.errorbar(bin_centers, bin_flux, yerr=bin_err, fmt='o',
+                    color='navy', ms=5, elinewidth=1.5, capsize=2,
+                    zorder=4, label=f'{int(bin_width_minutes)}-min bins')
+
 ax2.set_xlabel('Phase', fontsize=12)
 ax2.set_ylabel('Relative flux', fontsize=12)
 ax2.set_xlim([-0.05, 0.05])
 ax2.legend(fontsize=8)
 ax2.grid(alpha=0.3)
 ax2.set_title('Phase-folded transit')
+
+instrument = 'TESS'
+
+model = results.lc.evaluate(instrument)
+
+t = dataset.times_lc[instrument]
+flux = dataset.data_lc[instrument]
+residuals = flux - model
+
+# phase-fold on the fitted period/t0
+P = np.median(results.posteriors['posterior_samples']['P_p1'])
+t0 = np.median(results.posteriors['posterior_samples']['t0_p1'])
+phase_hr = (((t - t0 + 0.5*P) % P) / P - 0.5) * P * 24  # hours from mid-transit
+order = np.argsort(phase_hr)
 
 plt.tight_layout()
 plt.savefig(f'88297141_GP_QP_fit_SAP_v{run_number}.png', dpi=300, bbox_inches='tight')
@@ -406,6 +463,27 @@ fig_corner = corner.corner(
     label_kwargs={"fontsize": 12}
 )
 fig_corner.savefig(f'88297141_corner_SAP_v{run_number}.png', dpi=300, bbox_inches='tight')
+
+
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6), sharex=True,
+                                gridspec_kw={'height_ratios': [3, 1]})
+
+ax1.scatter(phase_hr, flux, s=4, alpha=0.4, color='gray')
+ax1.plot(phase_hr[order], model[order], color='crimson', lw=1.5, zorder=5)
+ax1.set_ylabel('Relative flux')
+
+ax2.scatter(phase_hr, residuals, s=4, alpha=0.4, color='gray')
+ax2.axhline(0, color='k', ls='--', lw=1)
+ax2.set_ylabel('Residuals')
+ax2.set_xlabel('Hours from mid-transit')
+
+half_window_hr = 2.5  # ~t14/2 (220.5 min) + a bit of padding
+ax1.set_xlim(-half_window_hr, half_window_hr)
+ax2.set_xlim(-half_window_hr, half_window_hr)
+plt.tight_layout()
+plt.show()
+plt.savefig(f"88297141_GP_QP_fit_SAP_v{run_number}_residuals.png", dpi = 300, bbox_inches = 'tight')
+
 plt.close()
 print(f"Saved: 88297141_corner_SAP_v{run_number}.png")
 print("Done.")
