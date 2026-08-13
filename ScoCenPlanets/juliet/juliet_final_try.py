@@ -34,7 +34,7 @@ import corner
 # SETTINGS
 # -------------------------------------------------------
 number_of_cores = 40
-run_number      = 20
+run_number      = 22
 
 # -------------------------------------------------------
 # KNOWN STELLAR / ORBITAL PARAMS
@@ -99,8 +99,8 @@ def load_tess_lc(lcpath):
     with fits.open(lcpath) as hdul:
         data = hdul[1].data
         time = data['TIME']
-        flux = data['SAP_FLUX']
-        ferr = data['SAP_FLUX_ERR']
+        flux = data['PDCSAP_FLUX']
+        ferr = data['PDCSAP_FLUX_ERR']
     mask = np.isfinite(time) & np.isfinite(flux) & np.isfinite(ferr)
     return time[mask], flux[mask], ferr[mask]
 
@@ -113,7 +113,7 @@ flux2_norm = flux2 / np.nanmedian(flux2)
 ferr1_norm = ferr1 / np.nanmedian(flux1)
 ferr2_norm = ferr2 / np.nanmedian(flux2)
 
-t_full = t1
+t_full = t2
 # # Stitch and sort
 # t_full    = np.concatenate([t1, t2])
 # flux_full = np.concatenate([flux1_norm, flux2_norm])
@@ -132,16 +132,16 @@ t_full = t1
 #     method='mad',
 #     center='median'
 # )
-flux_clipped = slide_clip(t1, flux1_norm.copy(), window_length = 0.5, low = 100, high = 2.5, method = 'mad', center = 'median')
+flux_clipped = slide_clip(t2, flux2_norm.copy(), window_length = 0.5, low = 100, high = 2.5, method = 'mad', center = 'median')
 
 
 mask_finite = np.isfinite(flux_clipped)
 
-t_clean = t1[mask_finite]
+t_clean = t2[mask_finite]
 #t_clean     = t_full[mask_finite]
 flux_clean  = flux_clipped[mask_finite]
 # ferr_clean  = ferr_full[mask_finite]
-ferr_clean = ferr1_norm[mask_finite]
+ferr_clean = ferr2_norm[mask_finite]
 
 # print(f"Points before clipping: {len(t_full)}")
 # print(f"Points after clipping:  {len(t_clean)}")
