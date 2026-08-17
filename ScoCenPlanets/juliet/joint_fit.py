@@ -153,25 +153,37 @@ def load_tess_lc(lcpath):
     mask = np.isfinite(time) & np.isfinite(flux) & np.isfinite(ferr)
     return time[mask], flux[mask], ferr[mask]
 
-## Add and normalize tess data 
+def_load_tess_AV_lc(lcpath):
+    ligthcurve_df = pd.read_csv(lcpath, header = None)
+    time = ligthcurve_df[0]
+    flux = lightcurve_df[1]
+    ferr = np.random.uniform(0.009, 0.014, size=len(time))
+    return time, flux, ferr 
 
-t1, flux1, ferr1 = load_tess_lc(TESS_S91)
-t2, flux2, ferr2 = load_tess_lc(TESS_S92)
 
-# Normalise each sector by its own median
-flux1_norm = flux1 / np.nanmedian(flux1)
-flux2_norm = flux2 / np.nanmedian(flux2)
-ferr1_norm = ferr1 / np.nanmedian(flux1)
-ferr2_norm = ferr2 / np.nanmedian(flux2)
+# ## Add and normalize tess data 
 
-# Stitch and sort
-t_full    = np.concatenate([t1, t2])
-flux_full = np.concatenate([flux1_norm, flux2_norm])
-ferr_full = np.concatenate([ferr1_norm, ferr2_norm])
-idx       = np.argsort(t_full)
-t_full    = t_full[idx]
-flux_full = flux_full[idx]
-ferr_full = ferr_full[idx]
+# t1, flux1, ferr1 = load_tess_lc(TESS_S91)
+# t2, flux2, ferr2 = load_tess_lc(TESS_S92)
+
+# # Normalise each sector by its own median
+# flux1_norm = flux1 / np.nanmedian(flux1)
+# flux2_norm = flux2 / np.nanmedian(flux2)
+# ferr1_norm = ferr1 / np.nanmedian(flux1)
+# ferr2_norm = ferr2 / np.nanmedian(flux2)
+
+# # Stitch and sort
+# t_full    = np.concatenate([t1, t2])
+# flux_full = np.concatenate([flux1_norm, flux2_norm])
+# ferr_full = np.concatenate([ferr1_norm, ferr2_norm])
+# idx       = np.argsort(t_full)
+# t_full    = t_full[idx]
+# flux_full = flux_full[idx]
+# ferr_full = ferr_full[idx]
+
+## with vanderburg's pipeline, we dont need to concatenate the data
+t_full, flux_full, ferr_full = def_load_tess_AC_lc("./tic88297141sc.csv")
+
 
 # Sigma clip — aggressive upward (flares), disabled downward (protect transits)
 flux_clipped = slide_clip(
@@ -469,10 +481,10 @@ mdilution_values ={
 'SWOPE': 1.0 , 
 'SSO': 0.985, 
 'CTIOz': 1.0, 
-'CTIOg': 0.99 , # for now
-'mcdg': 0.97, # for now
+'CTIOg': 0.99 ,
+'mcdg': 0.97,
 'mcdi': 0.965, 
-'ctioaprg' :0.98, # for now  
+'ctioaprg' :0.98, 
 'ctioapri': 0.985}
 
 for telescope in ground_telescopes:
@@ -667,6 +679,35 @@ p_best  = np.median(posterior_samples['P_p1'])
 t0_best = np.median(posterior_samples['t0_p1'])
 phases  = juliet.utils.get_phases(dataset.times_lc['TESS'], p_best, t0_best)
 
+import numpy as np
+
+G = 6.674e-11  # m^3 kg^-1 s^-2
+
+# from your juliet posterior dict/pickle
+P  = posterior_samples['P_p1']       # period
+p  = posterior_samples['p_p1']       # Rp/R* (or reconstruct from r1,r2 if using that parametrization)
+b  = posterior_samples['b_p1']       # impact parameter
+rho = posterior_samples['rho']       # a/R*
+
+
+P_sec = P * 86400.0
+
+ar = ((G * rho * P_sec**2) / (3.0 * np.pi))**(1.0/3.0)
+
+# guard against unphysical samples in the tails (b > a/R* -> arccos undefined)
+valid = (b / ar) <= 1.0
+
+i = np.full_like(b, np.nan)
+i[valid] = np.arccos(b[valid] / ar[valid])
+
+T14 = np.full_like(b, np.nan)
+T14[valid] = (P[valid] / np.pi) * np.arcsin(
+    (1.0 / ar[valid]) * np.sqrt((1 + p[valid])**2 - b[valid]**2) / np.sin(i[valid])
+)
+
+T14_hr = T14[valid] * 24.0
+med, lo, hi = np.percentile(T14_hr, [50, 16, 84])
+print(f"T14 = {med:.4f} +{hi-med:.4f} -{med-lo:.4f} hours")
 
 ### added this to save the gp stuff cuz im not able to access em
 np.savez(
@@ -861,9 +902,9 @@ fig_corner = corner.corner(
     title_kwargs={"fontsize": 10},
     label_kwargs={"fontsize": 12}
 )
-fig_corner.savefig(os.path.join(results_dir, f'88297141_corner_joint_v{run_number}.png'), dpi=300, bbox_inches='tight') 
+fig_corner.savefig(os.path.join(results_dir, f'88297141_corner_joint_v{run_number}.pdf'), dpi=300, bbox_inches='tight') 
 plt.close()
-print(f"Saved: 88297141_corner_joint_v{run_number}.png")
+print(f"Saved: 88297141_corner_joint_v{run_number}.pdf")
 
 ### Plotting ground based data with transit model:
 
@@ -885,7 +926,177 @@ def bin_in_phase(phases, y, yerr, bin_width, phase_range=(-0.05, 0.05)):
             errs.append(1. / np.sqrt(np.sum(w)))
     return np.array(centers), np.array(means), np.array(errs)
 
+def get_phase_folded_data(instrument, phase_span, bin_width_minutes=20.):
 
+    t_inst    = dataset.times_lc[instrument]
+    data_inst = dataset.data_lc[instrument]
+    err_inst  = dataset.errors_lc[instrument]
+
+    full_model, up68, low68, components = results.lc.evaluate(
+        instrument,
+        return_err=True,
+        return_components=True,
+        all_samples=True
+    )
+
+    lm_component   = components['lm']
+    pure_transit   = full_model - lm_component
+    data_corrected = data_inst - lm_component
+
+    phases = juliet.utils.get_phases(t_inst, p_best, t0_best)
+    idx_sort = np.argsort(phases)
+
+    bin_width = bin_width_minutes / (p_best * 24. * 60.)
+
+    bin_centers, bin_flux, bin_err = bin_in_phase(
+        phases,
+        data_corrected,
+        err_inst,
+        bin_width,
+        phase_range=(-phase_span, phase_span)
+    )
+
+    return {
+        "phases": phases,
+        "idx_sort": idx_sort,
+        "model": pure_transit,
+        "data": data_corrected,
+        "err": err_inst,
+        "bin_centers": bin_centers,
+        "bin_flux": bin_flux,
+        "bin_err": bin_err,
+    }
+
+all_phases = []
+
+
+for instrument in ground_telescopes:
+    phases = juliet.utils.get_phases(
+        dataset.times_lc[instrument],
+        p_best,
+        t0_best
+    )
+    all_phases.append(phases)
+
+all_phases = np.concatenate(all_phases)
+
+phase_span = np.max(np.abs(all_phases)) * 1.05
+
+import aesthetic.plot
+aesthetic.plot.set_style("science")
+
+
+fig, axes = plt.subplots(
+    2,
+    4,
+    figsize=(18,8),
+    sharex=False,
+    sharey=False
+)
+
+plt.rcParams.update({
+    "font.size": 14, # this was 12 before Luke told me to boost it 
+    "axes.titlesize": 13,
+    "axes.labelsize": 14, # this was 12 before 
+})
+
+axes = axes.flatten()
+
+telescope_names = {
+'SWOPE': 'SWOPE 2026-03-23 (R)' , 
+'SSO': 'SSO 2026-04-25 (I\')', 
+'CTIOz': 'CTIO 2026-06-24 (Z\')', 
+'CTIOg': 'CTIO 2026-06-24 (G\')' ,
+'mcdg': 'McDONALD 2026-04-16 (G\')', 
+'mcdi': 'McDONALD 2026-04-16 (I\')', 
+'ctioaprg' :'CTIO 2026-04-16 (G\')', 
+'ctioapri': 'CTIO 2026-04-16 (I\')'
+}
+for i, (ax, instrument) in enumerate(zip(axes, ground_telescopes)):
+
+    d = get_phase_folded_data(
+        instrument,
+        phase_span,
+        bin_width_minutes=20
+    )
+
+    # Transit model
+    ax.plot(
+        d["phases"][d["idx_sort"]],
+        d["model"][d["idx_sort"]],
+        color="black",
+        lw=2.5,
+        zorder=2
+    )
+
+    # Unbinned data
+    ax.errorbar(
+        d["phases"],
+        d["data"],
+        yerr=d["err"],
+        fmt=".",
+        color="steelblue",
+        alpha=0.45,
+        ms=3,
+        elinewidth=0.7,
+        zorder=3
+    )
+
+    # Binned data
+    if len(d["bin_centers"]) > 0:
+        ax.errorbar(
+            d["bin_centers"],
+            d["bin_flux"],
+            yerr=d["bin_err"],
+            fmt="o",
+            color="navy",
+            ms=6,
+            capsize=2,
+            elinewidth=1.5,
+            zorder=4
+        )
+
+    if i % 4 == 0:
+        ax.set_ylabel("Relative Flux", fontsize = 14)
+
+    if i >= 4:
+        ax.set_xlabel("Orbital Phase", fontsize = 14) ## added the fontsize here, it wasnt ther ebefore 
+
+    pad = 0.002
+
+    xmin = np.min(d["phases"]) - pad
+    xmax = np.max(d["phases"]) + pad
+
+    ax.set_xlim(xmin, xmax)
+    ax.grid(alpha=0.3)
+    ax.set_title(telescope_names[instrument], fontsize=16)
+
+
+# Bottom row
+for ax in axes[4:]:
+    ax.set_xlabel("Orbital Phase")
+
+plt.tight_layout()
+
+plots_dir = os.path.join(results_dir, 'ground_based_plots')
+os.makedirs(plots_dir, exist_ok=True)
+
+outfile = os.path.join(
+    plots_dir,
+    "ground_phase_folded_mosaic.pdf"
+)
+
+plt.savefig(outfile, dpi=300, bbox_inches="tight")
+plt.close()
+
+print(f"Saved: {outfile}")
+
+# Left column
+for ax in axes[::4]:
+    ax.set_ylabel("Relative Flux")
+
+
+aesthetic.plot.set_style("science")
 def plot_ground_instrument(instrument, save_dir, bin_width_minutes=20.):
     t_inst    = dataset.times_lc[instrument]
     data_inst = dataset.data_lc[instrument]
@@ -919,8 +1130,8 @@ def plot_ground_instrument(instrument, save_dir, bin_width_minutes=20.):
               label='Transit + polynomial model')
     ax1.errorbar(t_inst, data_inst, yerr=err_inst, fmt='.', alpha=0.4,
                  color='steelblue', zorder=3, label='Data')
-    ax1.set_xlabel('Time (BTJD)', fontsize=12)
-    ax1.set_ylabel('Relative flux', fontsize=12)
+    ax1.set_xlabel('Time (BTJD)', fontsize=16)
+    ax1.set_ylabel('Relative flux', fontsize=16)
     ax1.legend(fontsize=8); ax1.grid(alpha=0.3)
     ax1.set_title(f'{instrument} -- full light curve')
  
@@ -935,8 +1146,8 @@ def plot_ground_instrument(instrument, save_dir, bin_width_minutes=20.):
         ax2.errorbar(bin_centers, bin_flux, yerr=bin_err, fmt='o',
                      color='navy', ms=5, elinewidth=1.5, capsize=2,
                      zorder=4, label=f'{int(bin_width_minutes)}-min bins')
-    ax2.set_xlabel('Phase', fontsize=12)
-    ax2.set_ylabel('Relative flux', fontsize=12)
+    ax2.set_xlabel('Phase', fontsize=16)
+    ax2.set_ylabel('Relative flux', fontsize=16)
     ax2.set_xlim([-phase_span, phase_span])
     ax2.legend(fontsize=8); ax2.grid(alpha=0.3)
     ax2.set_title(f'{instrument} -- phase-folded')
@@ -948,13 +1159,270 @@ def plot_ground_instrument(instrument, save_dir, bin_width_minutes=20.):
     print(f"Saved: {outpath}")
  
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+"""Publication-quality mosaic of ground-based, phase-folded, detrended
+transit light curves across all instruments/bandpasses.
+
+Requires (already defined elsewhere in the existing pipeline):
+    dataset, results, p_best, t0_best, ground_telescopes, results_dir
+
+Changes vs. the original version:
+  - Same-night band pairs (CTIOz/CTIOg, mcdg/mcdi, ctioaprg/ctioapri) get
+    matched y-axis ranges, so band-to-band comparisons aren't distorted by
+    independently-chosen axis scaling.
+  - One shared legend for the whole mosaic instead of none.
+  - Removed dead code that ran after savefig()/close() (had no effect).
+  - xtick/ytick label sizes added to the rcParams pass so they scale with
+    everything else.
+"""
+
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+import juliet
+import aesthetic.plot
+
+aesthetic.plot.set_style("science")
+
+
+
+
+'''
+plt.rcParams.update({
+    "font.size": 14,
+    "axes.titlesize": 15,
+    "axes.labelsize": 14,
+    "xtick.labelsize": 12,
+    "ytick.labelsize": 12,
+    "font.weight": "bold",
+    "axes.labelweight": "bold",
+    "axes.titleweight": "bold",
+})
+
+'''
+plt.rcParams.update({
+    "font.size": 18,
+    "axes.titlesize": 20,
+    "axes.labelsize": 18,
+    "xtick.labelsize": 15,
+    "ytick.labelsize": 15,
+})
+
+def bin_in_phase(phases, y, yerr, bin_width, phase_range=(-0.05, 0.05)):
+    """Weighted-mean binning in phase space. Returns only non-empty bins."""
+    bin_edges = np.arange(phase_range[0], phase_range[1] + bin_width, bin_width)
+    centers, means, errs = [], [], []
+    for lo, hi in zip(bin_edges[:-1], bin_edges[1:]):
+        in_bin = (phases >= lo) & (phases < hi)
+        if in_bin.sum() > 0:
+            w = 1. / yerr[in_bin] ** 2
+            centers.append(0.5 * (lo + hi))
+            means.append(np.average(y[in_bin], weights=w))
+            errs.append(1. / np.sqrt(np.sum(w)))
+    return np.array(centers), np.array(means), np.array(errs)
+
+
+def get_phase_folded_data(instrument, phase_span, bin_width_minutes=20.):
+    t_inst = dataset.times_lc[instrument]
+    data_inst = dataset.data_lc[instrument]
+    err_inst = dataset.errors_lc[instrument]
+
+    full_model, up68, low68, components = results.lc.evaluate(
+        instrument, return_err=True, return_components=True, all_samples=True
+    )
+    lm_component = components['lm']
+    pure_transit = full_model - lm_component
+    data_corrected = data_inst - lm_component
+
+    phases = juliet.utils.get_phases(t_inst, p_best, t0_best)
+    idx_sort = np.argsort(phases)
+    bin_width = bin_width_minutes / (p_best * 24. * 60.)
+
+    bin_centers, bin_flux, bin_err = bin_in_phase(
+        phases, data_corrected, err_inst, bin_width,
+        phase_range=(-phase_span, phase_span)
+    )
+
+    return {
+        "phases": phases, "idx_sort": idx_sort, "model": pure_transit,
+        "data": data_corrected, "err": err_inst,
+        "bin_centers": bin_centers, "bin_flux": bin_flux, "bin_err": bin_err,
+    }
+
+
+telescope_names = {
+    'SWOPE': 'SWOPE 2026-03-23 (R)',
+    'SSO': 'SSO 2026-04-25 (I\')',
+    'CTIOz': 'CTIO 2026-06-24 (Zs)',
+    'CTIOg': 'CTIO 2026-06-24 (G\')',
+    'mcdg': 'McDONALD 2026-04-16 (G\')',
+    'mcdi': 'McDONALD 2026-04-16 (I\')',
+    'ctioaprg': 'CTIO 2026-04-16 (G\')',
+    'ctioapri': 'CTIO 2026-04-16 (I\')',
+}
+
+# Same-night pairs get matched y-axis ranges, so a reader compares bands
+# fairly instead of being misled by independently-scaled axes.
+same_night_pairs = [
+    ('CTIOz', 'CTIOg'),
+    ('mcdg', 'mcdi'),
+    ('ctioaprg', 'ctioapri'),
+]
+
+# ---- gather phase-folded data for every instrument up front ----
+all_phases = []
+for instrument in ground_telescopes:
+    phases = juliet.utils.get_phases(dataset.times_lc[instrument], p_best, t0_best)
+    all_phases.append(phases)
+phase_span = np.max(np.abs(np.concatenate(all_phases))) * 1.05
+
+data_by_instrument = {
+    instrument: get_phase_folded_data(instrument, phase_span, bin_width_minutes=20.)
+    for instrument in ground_telescopes
+}
+
+# ---- matched y-limits for each same-night pair (percentile-based padding
+#      so a single outlier point doesn't dictate the whole range) ----
+ylims = {}
+for inst_a, inst_b in same_night_pairs:
+    if inst_a not in data_by_instrument or inst_b not in data_by_instrument:
+        continue
+    combined = np.concatenate([
+        data_by_instrument[inst_a]["data"], data_by_instrument[inst_b]["data"]
+    ])
+    lo, hi = np.percentile(combined, [0.5, 99.5])
+    pad = 0.15 * (hi - lo)
+    ylims[inst_a] = (lo - pad, hi + pad)
+    ylims[inst_b] = (lo - pad, hi + pad)
+
+# ---- build the mosaic ----
+fig, axes = plt.subplots(2, 4, figsize=(16, 10), sharex=False, sharey=False)
+axes = axes.flatten()
+
+model_line, data_pts, bin_pts = None, None, None
+
+for i, (ax, instrument) in enumerate(zip(axes, ground_telescopes)):
+    d = data_by_instrument[instrument]
+
+    model_line, = ax.plot(
+        d["phases"][d["idx_sort"]], d["model"][d["idx_sort"]],
+        color="black", lw=2.5, zorder=2, label="Transit model"
+    )
+    data_pts = ax.errorbar(
+        d["phases"], d["data"], yerr=d["err"], fmt=".", color="steelblue",
+        alpha=0.45, ms=3, elinewidth=0.7, zorder=3, label="Unbinned data"
+    )
+    if len(d["bin_centers"]) > 0:
+        bin_pts = ax.errorbar(
+            d["bin_centers"], d["bin_flux"], yerr=d["bin_err"], fmt="o",
+            color="navy", ms=6, capsize=2, elinewidth=1.5, zorder=4,
+            label="20-min bins"
+        )
+
+    if i % 4 == 0:
+        ax.set_ylabel("Relative Flux")
+    if i >= 4:
+        ax.set_xlabel("Orbital Phase")
+
+    pad = 0.002
+    ax.set_xlim(np.min(d["phases"]) - pad, np.max(d["phases"]) + pad)
+
+    if instrument in ylims:
+        ax.set_ylim(*ylims[instrument])
+
+    ax.grid(alpha=0.3)
+    ax.set_title(telescope_names[instrument])
+
+# one shared legend for the whole mosaic instead of repeating it per panel
+handles, labels = [model_line, data_pts], ["Transit model", "Unbinned data"]
+if bin_pts is not None:
+    handles.append(bin_pts)
+    labels.append("20-min bins")
+fig.legend(handles=handles, labels=labels, loc="lower center", ncol=3,
+           bbox_to_anchor=(0.5, -0.02), frameon=False)
+
+plt.tight_layout(rect=[0, 0.04, 1, 1])  # leave room for the shared legend
+
 plots_dir = os.path.join(results_dir, 'ground_based_plots')
 os.makedirs(plots_dir, exist_ok=True)
+plots_figure = os.path.join("../../tic88297141/paper/figures/", "ticks_labels_inflated_prime.pdf")
+outfile = os.path.join(plots_dir, "ticks_labels_inflated_primed.pdf")
+plt.savefig(plots_figure, dpi = 300, bbox_inches ="tight")
+plt.savefig(outfile, dpi=300, bbox_inches="tight")
+plt.close()
+print(f"Saved: {outfile}")
+
+
 # -------------------------------------------------------
 # RUN
 # -------------------------------------------------------
 for telescope in ground_telescopes:
     plot_ground_instrument(telescope, plots_dir)
 
+
+
+# --- Plot 3: corner plot ---
+params_corner = ['p_p1', 'b_p1', 'rho']
+
+# convert rho from kg/m^3 to g/cm^3 for readability
+rho_idx = params_corner.index('rho')
+
+samples_corner = np.array([posterior_samples[param]
+                            for param in params_corner]).T
+
+samples_corner[:, rho_idx] = samples_corner[:, rho_idx] / 1000.0
+
+labels_corner = ['Rp/R*', 'b','ρ* (g/cm³)']
+
+
+# 1, 2, 3, 4-sigma levels for the 2D contours (this is what the paper figure uses)
+sigma_levels = 1.0 - np.exp(-0.5 * np.arange(1, 5) ** 2)
+
+fig_corner = corner.corner(
+    samples_corner,
+    labels=labels_corner,
+    quantiles=[0.16, 0.5, 0.84],
+    show_titles=False,
+    label_kwargs={"fontsize": 16, "fontweight" : "bold"},
+    levels=sigma_levels,          # 4 contour levels instead of the default 2
+    fill_contours=True,           # solid gray->black shading, not just outlines
+    plot_datapoints=False,        # removes the scatter cloud that looks "messy"
+    plot_density=False,           # avoid a second, redundant density colormap
+    smooth=1.0,                   # Gaussian-smooths the 2D histograms
+    smooth1d=1.0,                 # smooths the 1D histograms on the diagonal
+    bins=25,                      # finer binning helps the smoothing look clean
+    color='k',                    # black -> corner shades white(outer) to black(inner)
+    hist_kwargs={"color": "black", "linewidth": 1.3},
+    contour_kwargs={"linewidths": 1.2},
+    max_n_ticks=4,
+)
+
+for ax in fig_corner.get_axes():
+    ax.tick_params(axis='both', which='major', labelsize=12, width=1.2, length=5)
+    for label in ax.get_xticklabels() + ax.get_yticklabels():
+        label.set_fontweight('bold')
+
+fig_corner.savefig(os.path.join(results_dir, f'88297141_corner_aesthetic_joint_v{run_number}.pdf'),
+                    dpi=300, bbox_inches='tight')
+plt.close()
+print(f"Saved: 88297141_corner_aesthetic_joint_v{run_number}.pdf")
+
+
+N = len(posterior_samples['b_p1'])
+print(N)
+grazing_fraction = np.mean(posterior_samples['b_p1'] > (1 - posterior_samples['p_p1']))
+print(f"Fraction of posterior in grazing regime: {grazing_fraction:.4f}")
 
 print("Done.")
